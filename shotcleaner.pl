@@ -1198,10 +1198,10 @@ sub _run_trimmomatic{
     my @in_suffixes = @{ $args->{"in_suffixes"} };
 
     my $pm = Parallel::ForkManager->new($nprocs);
-    for( my $i=1; $i<=$nprocs; $i++ ){
+    for( my $i=0; $i<$nprocs; $i++ ){
 	my $pid = $pm->start and next;
 	#do some housekeeping
-	my $read = $reads[$i-1];          
+	my $read = $reads[$i];          
 	#prepare input files
 	my ( $f_in, $r_in );
 	my $f_mate = $read;
@@ -1209,7 +1209,7 @@ sub _run_trimmomatic{
 	my $f_base = basename( $read, @in_suffixes ); #this contains the split value!
 	if( $paired_end ){
 	    $r_in  = $f_in;
-	    $r_in     =~ s/$f_base/${mate_base}_${i}/;
+	    $r_in  =~ s/$f_base/${mate_base}_${i}/;
 	}
 	#prepare log file
 	my $log = File::Spec->catfile( $log_dir, $f_mate . ".log" );

@@ -22,7 +22,7 @@ was designed to be run on a multi-core, UNIX OS machine.
 Quickstart
 ----------
 
-1. Build a host genome index:
+**(1) Build a host genome index:**
 
     perl shotcleaner/index_genome -i <host_genome.fasta> -d <index_database> -n <index_basename> -m <filter_method>
 
@@ -32,7 +32,7 @@ For example:
 
 You only need to do this once per host genome per filter method
 
-2. Execute shotcleaner:
+**(2) Execute shotcleaner:**
 
 For paired end data:
 
@@ -44,6 +44,18 @@ For singled end data:
 
 shotcleaner will produce a directory as specified by -o that contains the results of each step of the workflow, with the final output
 being a cleaned fasta file in <output_directory/fasta_cleaned>. 
+
+INSTALLATION
+------------
+
+You can use the auto-installer, install.pl, which attempts to install all dependencies for shotcleaner (see Dependencies). Note that this may not work on all systems (e.g., it assumes an x86 architecture), which means dependencies will need to be installed by hand.
+
+ To implement this installer:
+
+cd shotcleaner/
+perl install.pl &> install.log
+
+This may take some time. 
 
 Options
 -------
@@ -115,3 +127,25 @@ Note that fastuniq can only work with paired end data.
 
 Should the results be compressed? This removes data produced during intermediary steps and temporary files. Only the cleaned
 fastq, fasta, and fastqc results will be retained, and all files will be gzipped. Silence by using --nocompress.
+
+Dependencies
+------------
+
+###Perl Modules
+*Carp
+*File::Basename
+*File::Copy
+*File::Path
+*File::Spec
+*File::Spec::Functions
+*Parallel::ForkManager
+*Getopt::Long
+
+###External Software
+*bowtie2
+*bmtagger
+*FastQC
+*FastUnique
+*prinseq
+*seqret (EMBOSS)
+*trimmomatic
