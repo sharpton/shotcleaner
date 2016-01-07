@@ -43,7 +43,7 @@ For singled end data:
      perl shotcleaner/shotcleaner.pl -1 <forward_reads.fq.gz> -o <output_directory> -d <index_database> -n <index_basename> --nprocs <number_of_processors>
 
 shotcleaner will produce a directory as specified by -o that contains the results of each step of the workflow, with the final output
-being a cleaned fasta file in <output_directory/fasta_cleaned>. 
+being a cleaned fasta or fastq file in <output_directory/fasta_cleaned> or <output_directory/fastq_cleaned>, respectively.
 
 INSTALLATION
 ------------
@@ -102,6 +102,10 @@ prior to running shotcleaner.pl by using index_genome.pl.
 
 User specified base name of the host genome index files. Ttake on the form of <BASENAME>.bt2, for example, with the extension
 varying depending on the method used.
+
+* **-f, OUTPUT FORMAT, options: fasta fastq** (OPTIONAL) DEFAULT = "fasta"
+
+The format of the output produced by shotcleaner. Can either be fasta or fastq.
 
 * **--trim, LIST OF TRIM METHODS** (OPTIONAL) DEFAULT = "trimmomatic"
 

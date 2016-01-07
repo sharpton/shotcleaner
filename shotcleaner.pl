@@ -21,7 +21,6 @@ my $out_dir;
 my $index_dir;
 my $index_basename;
 
-
 #defaults
 my $nprocs             = 1;
 my $paired_end         = 0;
@@ -35,13 +34,14 @@ my $filter_method_list = "bowtie2"; #bowtie2 | bmtagger (deconseq obsolete)
 my $derep_method_list  =  "fastuniq"; #fastuniq | prinseq-derep
 my $overwrite          = 1; #for now, assume the user is aware
 my @in_suffixes        = ( ".fq", ".fastq", ".fq.gz", ".fastq.gz" ); #useful for basename
-
+my $out_format         = "fasta"; #fasta | fastq
 GetOptions(
     "1=s"         => \$in_fastq,
     "2:s"         => \$pair_fastq,
     "o=s"         => \$out_dir,
     "d=s"         => \$index_dir,
     "n=s"         => \$index_basename,
+    "f:s"         => \$out_format,
     "nprocs=i"    => \$nprocs,
     "compress!"   => \$compress,
     "qc:s"        => \$qc_method_list,
@@ -52,7 +52,7 @@ GetOptions(
 
 ### INITIALIZATION
 _check_vars( $in_fastq,  $pair_fastq,    $out_dir, 
-	     $index_dir, $index_basename );
+	     $index_dir, $index_basename, $out_format );
 my @qc_methods     = @{ _parse_method_list(  $qc_method_list,    "qc"     ) };
 my @trim_methods   = @{ _parse_method_list( $trim_method_list,   "trim"   ) };
 my @filter_methods = @{ _parse_method_list( $filter_method_list, "filter" ) };
@@ -83,7 +83,7 @@ make_path( $tmp_dir );
 ### GET PIPELINE SETTINGS
 
 my $settings = _set_settings( \@qc_methods, \@trim_methods, 
-			      \@filter_methods, \@derep_methods );
+			      \@filter_methods, \@derep_methods, $out_format );
 my ( $run_raw_qc, $split_reads, $run_trim, $run_filter,
   $cat_reads, $derep, $check_qc, $fasta_cleaned ) = @{ $settings->{"parameters"} };
  
@@ -402,28 +402,30 @@ if( $check_qc ){
 }
 
 if( $fasta_cleaned ){    
-    my $fasta_in_dir      = File::Spec->catdir( $out_dir, $settings->{"fasta_cleaned"}->{"input"}  );
-    my $fasta_results_dir = File::Spec->catdir( $out_dir, $settings->{"fasta_cleaned"}->{"output"} );
-    my $fasta_log_dir     = File::Spec->catdir( $logdir, $settings->{"fasta_cleaned"}->{"log"} );
-    my $seqret_bin        = File::Spec->catfile( $root, "bin", "seqret" );
-    make_path( $fasta_results_dir );
-    make_path( $fasta_log_dir );
-    
-    print "SEQRET: " . scalar(localtime()) . "\n";
-    _run_seqret( {
-	in_dir      => $fasta_in_dir,
-	file_names  => \@reads, 
-	result_dir  => $fasta_results_dir, 
-	log_dir     => $fasta_log_dir, 
-	nprocs      => 1,
-	seqret      => $seqret_bin,
-	mate_basename => $mate_basename,
-	in_suffixes   => \@in_suffixes,
+    if( $out_format eq "fastq" ){
 
-		 });
+    } else {    
+	my $fasta_in_dir      = File::Spec->catdir( $out_dir, $settings->{"fasta_cleaned"}->{"input"}  );
+	my $fasta_results_dir = File::Spec->catdir( $out_dir, $settings->{"fasta_cleaned"}->{"output"} );
+	my $fasta_log_dir     = File::Spec->catdir( $logdir, $settings->{"fasta_cleaned"}->{"log"} );
+	my $seqret_bin        = File::Spec->catfile( $root, "bin", "seqret" );
+	make_path( $fasta_results_dir );
+	make_path( $fasta_log_dir );
+	
+	print "SEQRET: " . scalar(localtime()) . "\n";
+	_run_seqret( {
+	    in_dir      => $fasta_in_dir,
+	    file_names  => \@reads, 
+	    result_dir  => $fasta_results_dir, 
+	    log_dir     => $fasta_log_dir, 
+	    nprocs      => 1,
+	    seqret      => $seqret_bin,
+	    mate_basename => $mate_basename,
+	    in_suffixes   => \@in_suffixes,
+	    
+		     });
+    }
 }
-
-die;
 
 if( $compress ){
     print "COMPRESSING DATA: " . scalar(localtime()) . "\n";
@@ -1012,7 +1014,7 @@ sub _cat_reads{
 
 sub _set_settings{
     my ($ra_qc_methods, $ra_trim_methods,
-	$ra_filter_methods, $ra_derep_methods ) = @_;
+	$ra_filter_methods, $ra_derep_methods, $out_format ) = @_;
     my $run_raw_qc   = 1;
     my $split_reads  = 1;
     my $run_trim     = 1;
@@ -1022,7 +1024,7 @@ sub _set_settings{
     my $check_qc     = 1;
     my $fasta_cleaned= 1;
     my $settings = _build_settings($ra_qc_methods, $ra_trim_methods,
-				   $ra_filter_methods, $ra_derep_methods ) ;
+				   $ra_filter_methods, $ra_derep_methods, $out_format ) ;
     my @params   = ( $run_raw_qc, $split_reads, $run_trim, $run_filter,
 		     $cat_reads, $derep, $check_qc, $fasta_cleaned );
     $settings->{"parameters"} = \@params;
@@ -1031,7 +1033,7 @@ sub _set_settings{
 
 sub _build_settings{
     my ($ra_qc_methods, $ra_trim_methods,
-	$ra_filter_methods, $ra_derep_methods ) = @_;
+	$ra_filter_methods, $ra_derep_methods, $out_format ) = @_;
     my @qc_methods     = @{ $ra_qc_methods };
     my @trim_methods   = @{ $ra_trim_methods };
     my @filter_methods = @{ $ra_filter_methods };
@@ -1051,7 +1053,11 @@ sub _build_settings{
 	} elsif( $key eq "fasta_cleaned" ){
 	    my $prior = $keys[$i-2]; #check_qc is always just before fasta_cleaned
 	    $settings->{$key}->{"input"}  = $prior;
-	    $settings->{$key}->{"output"} = $key;
+	    if( $out_format eq "fastq" ){
+		$settings->{$key}->{"output"} = $out_format;
+	    } else {
+		$settings->{$key}->{"output"} = $key;
+	    }
 	    $settings->{$key}->{"log"}    = $key . "_log";
 	    next;
 	} else {
@@ -1078,7 +1084,7 @@ sub _get_root{
 
 sub _check_vars{
     my ( $in_fastq,  $pair_fastq, $out_dir, 
-	 $index_dir, $index_basename ) = @_;
+	 $index_dir, $index_basename, $out_format ) = @_;
     if( !defined $in_fastq ){
 	die( "You must point me to a fastq file using -1\n" );
     }
@@ -1103,6 +1109,11 @@ sub _check_vars{
     }
     if( !defined( $index_basename) ){
 	die( "You must provide an index_basename -n so that I know which genome in index_db to use." );
+    }
+    if( $out_format ne "fasta" &&
+	$out_format ne "fastq" ){
+	die( "Option -f must be either fasta or fastq. You specified:\n" .
+	     $out_format . "\n" );
     }
     my @files = glob( $index_dir . "/" . $index_basename . "*" );
     if( !@files ){
