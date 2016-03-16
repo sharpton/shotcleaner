@@ -24,11 +24,11 @@ Quickstart
 
 **(1) Build a host genome index:**
 
-    perl shotcleaner/index_genome -i <host_genome.fasta> -d <index_database> -n <index_basename> -m <filter_method>
+    perl index_genome.pl -i <host_genome.fasta> -d <index_database> -n <index_basename> -m <filter_method>
 
 For example:
 
-    perl shotcleaner/index_genome -i /data/genomes/hg19.fa -d ~/projects/index_database -n h_sapien -m bowtie2
+    perl index_genome.pl -i test/e_coli/CP001163.fa -d test/index_db -n e_coli-m bowtie2
 
 You only need to do this once per host genome per filter method
 
@@ -36,11 +36,11 @@ You only need to do this once per host genome per filter method
 
 For paired end data:
 
-     perl shotcleaner/shotcleaner.pl -1 <forward_reads.fq.gz> -2 <reverse_reads.fq.gz> -o <output_directory> -d <index_database> -n <index_basename> --nprocs <number_of_processors>
+     perl shotcleaner.pl -1 <forward_reads.fq.gz> -2 <reverse_reads.fq.gz> -o <output_directory> -d <index_database> -n <index_basename> --nprocs <number_of_processors>
 
 For singled end data:
 
-     perl shotcleaner/shotcleaner.pl -1 <forward_reads.fq.gz> -o <output_directory> -d <index_database> -n <index_basename> --nprocs <number_of_processors>
+     perl shotcleaner.pl -1 <forward_reads.fq.gz> -o <output_directory> -d <index_database> -n <index_basename> --nprocs <number_of_processors>
 
 shotcleaner will produce a directory as specified by -o that contains the results of each step of the workflow, with the final output
 being a cleaned fasta or fastq file in <output_directory/fasta_cleaned> or <output_directory/fastq_cleaned>, respectively.
@@ -55,7 +55,9 @@ You can use the auto-installer, install.pl, which attempts to install all depend
 cd shotcleaner/
 perl install.pl &> install.log
 
-This may take some time. 
+This may take some time. Once that completes, we recommend you check your installation by running the following tests:
+
+perl run_tests.pl &> test.log
 
 Options
 -------

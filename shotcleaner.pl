@@ -33,43 +33,66 @@ my $filter_method_list = "bowtie2"; #bowtie2 | bmtagger (deconseq obsolete)
 #tool for single end data
 my $derep_method_list  =  "fastuniq"; #fastuniq | prinseq-derep
 my $overwrite          = 1; #for now, assume the user is aware
-my @in_suffixes        = ( ".fq", ".fastq", ".fq.gz", ".fastq.gz" ); #useful for basename
+my @in_suffixes        = ( ".fq", ".fastq", ".fq.gz", ".fastq.gz", 
+			   ".fa", ".fasta", ".fa.gz", ".fasta.gz" ); #useful for basename
 my $out_format         = "fasta"; #fasta | fastq
+my $in_format          = "fastq"; #fasta | fastq
+
+my $filter_test = 0;
+my $jm          = "4G";
 GetOptions(
     "1=s"         => \$in_fastq,
     "2:s"         => \$pair_fastq,
     "o=s"         => \$out_dir,
     "d=s"         => \$index_dir,
     "n=s"         => \$index_basename,
-    "f:s"         => \$out_format,
+    "of:s"        => \$out_format,
     "nprocs=i"    => \$nprocs,
     "compress!"   => \$compress,
     "qc:s"        => \$qc_method_list,
     "trim:s"      => \$trim_method_list,
-    "filter:s"    => \$filter_method_list,
+    "m|filter:s"    => \$filter_method_list,
     "derep:s"     => \$derep_method_list,
+    "if:s"        => \$in_format,
+    #dev options only
+    "filter-test!" => \$filter_test,
+    "java-ram=s"   => \$jm,
     );
 
 ### INITIALIZATION
+$in_format = _check_in_format( $in_fastq, $in_format );
 _check_vars( $in_fastq,  $pair_fastq,    $out_dir, 
-	     $index_dir, $index_basename, $out_format );
+	     $index_dir, $index_basename, $in_format,
+	     $out_format );
+
+my $mate_basename;
+if( defined( $pair_fastq ) ){
+    $paired_end    = 1;
+    $mate_basename = basename( $pair_fastq, @in_suffixes );
+}
+
+#fastuniq only works on paired end data
+if( $derep_method_list =~ m/fastuniq/ ){
+    if( !$paired_end ){
+	unless( $filter_test ){
+	    print( "You cannot invoke fastuniq on non-paired end data. Please instead only invoke " .
+		   "--derep prinseq-derep Note that I am switching for you\n" );
+	    $derep_method_list = "prinseq-derep";
+	}
+    } elsif( $in_format eq "fasta" ){
+	print( "FastUniq current doesn't work with fasta sequences. I am switching to " .
+	       "--derep prinseq-derep " .
+	       "for you.\n");       
+	$derep_method_list = "prinseq-derep";
+    }
+}
+
 my @qc_methods     = @{ _parse_method_list(  $qc_method_list,    "qc"     ) };
 my @trim_methods   = @{ _parse_method_list( $trim_method_list,   "trim"   ) };
 my @filter_methods = @{ _parse_method_list( $filter_method_list, "filter" ) };
 my @derep_methods  = @{ _parse_method_list( $derep_method_list,  "derep"  ) };
 
-my $mate_basename;
-if( defined( $pair_fastq ) ){
-    $paired_end = 1;
-    $mate_basename = basename( $pair_fastq, @in_suffixes );
-}
 
-#fastuniq only works on paired end data
-if( $derep_method_list =~ m/fastuniq/ &&
-    !$paired_end ){
-    die( "You cannot invoke fastuniq on non-paired end data. Please instead only invoke " .
-	 "--derep prinseq-derep\n" );
-}
 
 my $logdir    = File::Spec->catdir( $out_dir, "logs" );
 if( ! defined( $logdir ) ){
@@ -83,14 +106,19 @@ make_path( $tmp_dir );
 ### GET PIPELINE SETTINGS
 
 my $settings = _set_settings( \@qc_methods, \@trim_methods, 
-			      \@filter_methods, \@derep_methods, $out_format );
+			      \@filter_methods, \@derep_methods, $in_format, $out_format,
+			      $filter_test );
 my ( $run_raw_qc, $split_reads, $run_trim, $run_filter,
   $cat_reads, $derep, $check_qc, $fasta_cleaned ) = @{ $settings->{"parameters"} };
+
+if( $filter_test ){
+    @derep_methods = ();
+}
  
 
 ### START PIPELINE
 
-print scalar(localtime()) . "\n";
+print "START: " . scalar(localtime()) . "\n";
 
 if( $run_raw_qc ){
     foreach my $method( @qc_methods ){
@@ -136,6 +164,7 @@ if( $split_reads ){
 	n_splits    => $nprocs,	
 	log_dir     => $split_log_dir,
 	split_reads => $split_reads_bin,
+	in_format   => $in_format,
 		      }
 	);
     if( $paired_end ){
@@ -147,11 +176,12 @@ if( $split_reads ){
 	    n_splits    => $nprocs,	
 	    log_dir     => $split_log_dir,
 	    split_reads => $split_reads_bin,
+	    in_format   => $in_format,
 			  }
 	    );
     }
     if( defined( $split_reads_dir ) ){
-	@reads = @{ _get_fastq_file_names( $split_reads_dir, 0 ) };
+	@reads = @{ _get_fastq_file_names( $split_reads_dir, 0, $mate_basename ) };
     } else {
 	die "Couldn't get split read file names!\n";
     }
@@ -200,6 +230,7 @@ if( $run_trim ){
 		paired_end    => $paired_end,
 		mate_basename => $mate_basename,
 		in_suffixes   => \@in_suffixes,
+		ram           => $jm,
 		  });		
 	}
     }
@@ -230,6 +261,7 @@ if( $run_filter ){
 		paired_end  => $paired_end,
 		mate_basename => $mate_basename,
 		in_suffixes   => \@in_suffixes,
+		in_format     => $in_format,
 			   });       	    
 	}
 	if( $method eq "bmtagger" ){
@@ -258,13 +290,13 @@ if( $run_filter ){
 		paired_end  => $paired_end,
 		mate_basename => $mate_basename,
 		in_suffixes   => \@in_suffixes,
-
+		in_format     => $in_format,
 			   });       
 	}
-	#note that deconseq doesn't currently support mate_paired data
+	#note that deconseq doesn't seem to currently support mate_paired data
 	#also, it is challenging to automate the deconseq config file
 	#finally, an update to bwa now breaks deconseq in our hands (change in the output produced
-	#by bwa index). 
+ 	#by bwa index). 
 	#given the above, we do not currently support deconseq.
 	if( $method eq "deconseq" ){
 	    my $deconseq_in_dir      = File::Spec->catdir( $out_dir, $settings->{"deconseq"}->{"input"} );
@@ -343,6 +375,7 @@ if( @derep_methods ){
 		paired_end => $paired_end,
 		mate_basename => $mate_basename,
 		in_suffixes   => \@in_suffixes,
+		in_format     => $in_format,
 			  });	
 	}
 	if( $method eq "prinseq-derep" ){
@@ -365,6 +398,7 @@ if( @derep_methods ){
 		derep      => 1,
 		mate_basename => $mate_basename,
 		in_suffixes   => \@in_suffixes,
+		in_format     => $in_format,
 			  });
 	}
     }
@@ -402,8 +436,12 @@ if( $check_qc ){
 }
 
 if( $fasta_cleaned ){    
+    print "PRODUCING OUTPUT: " . scalar(localtime()) . "\n";
     if( $out_format eq "fastq" ){
-
+	my $fastq_in_dir      = File::Spec->catdir( $out_dir, $settings->{"fasta_cleaned"}->{"input"}  );
+	my $fastq_results_dir = File::Spec->catdir( $out_dir, $settings->{"fasta_cleaned"}->{"output"} );	
+	print "cp ${fastq_in_dir}/*.fq ${fastq_results_dir}\n";	
+	`cp ${fastq_in_dir}/*.fq ${fastq_results_dir}`;	
     } else {    
 	my $fasta_in_dir      = File::Spec->catdir( $out_dir, $settings->{"fasta_cleaned"}->{"input"}  );
 	my $fasta_results_dir = File::Spec->catdir( $out_dir, $settings->{"fasta_cleaned"}->{"output"} );
@@ -411,20 +449,23 @@ if( $fasta_cleaned ){
 	my $seqret_bin        = File::Spec->catfile( $root, "bin", "seqret" );
 	make_path( $fasta_results_dir );
 	make_path( $fasta_log_dir );
-	
-	print "SEQRET: " . scalar(localtime()) . "\n";
-	_run_seqret( {
-	    in_dir      => $fasta_in_dir,
-	    file_names  => \@reads, 
-	    result_dir  => $fasta_results_dir, 
-	    log_dir     => $fasta_log_dir, 
-	    nprocs      => 1,
-	    seqret      => $seqret_bin,
-	    mate_basename => $mate_basename,
-	    in_suffixes   => \@in_suffixes,
-	    
-		     });
-    }
+	if( $in_format eq "fastq" ){	    
+	    print "SEQRET: " . scalar(localtime()) . "\n";
+	    _run_seqret( {
+		in_dir      => $fasta_in_dir,
+		file_names  => \@reads, 
+		result_dir  => $fasta_results_dir, 
+		log_dir     => $fasta_log_dir, 
+		nprocs      => 1,
+		seqret      => $seqret_bin,
+		mate_basename => $mate_basename,
+		in_suffixes   => \@in_suffixes,		    
+			 });
+	} else {
+	    print "cp ${fasta_in_dir}/*.fa ${fasta_results_dir}\n";	
+	    `cp ${fasta_in_dir}/*.fa ${fasta_results_dir}`;	
+	}
+    } 
 }
 
 if( $compress ){
@@ -437,6 +478,9 @@ if( $compress ){
 	    in_dir => File::Spec->catdir( $out_dir, $settings->{$method}->{"output"}  )
 			   });
     }
+    _compress_results( { 
+	in_dir => File::Spec->catdir( $out_dir, $settings->{"split_reads"}->{"output"}  ),
+		       });
     _compress_results( { 
 	in_dir => File::Spec->catdir( $out_dir, $settings->{"cat_reads"}->{"output"}  ),
 	delete => 1,
@@ -455,8 +499,7 @@ if( $compress ){
     };
 }
 
-print scalar(localtime()) . "\n";
-
+print "STOP: " . scalar(localtime()) . "\n";
 
 ########
 #
@@ -487,7 +530,9 @@ sub _run_seqret{
 	my $outseq = File::Spec->catfile( $result_dir, $f_base . ".fa" );	
 	$cmd = "$seqret -sequence $f_in -outseq $outseq -sformat1 fastq -osformat2 fasta &> $f_log";
 	print "$cmd\n";
-	system( $cmd );
+	if( system( $cmd ) ){
+	    die "GOT AN ERROR RUNNING SEQRET!\n";
+	}
 	if( $paired_end ){
 	    my $r_in;
 	    $r_in  = $f_in;
@@ -497,7 +542,9 @@ sub _run_seqret{
 	    my $routseq = File::Spec->catfile( $result_dir, $r_base . ".fa" );	
 	    my $rcmd = "$seqret -sequence $r_in -outseq $routseq -sformat1 fastq -osformat2 fasta &> $r_log";
 	    print "$rcmd\n";
-	    system( $rcmd );
+	    if( system( $rcmd ) ){
+		die "GOT AN ERROR RUNNING SEQRET!\n";
+	    }
 	}
     }
 }
@@ -522,14 +569,17 @@ sub _compress_results{
 	else{
 	    next if( -d $path );
 	    print "Compressing $path\n";
-	    system( "gzip $path" );
+	    if( system( "gzip $path" ) ){
+		die "GOT AN ERROR RUNNING COMPRESS RESULTS!\n";
+	    }
 	}
     }
 }
 
 sub _get_fastq_file_names{
-    my $masterdir = shift;
-    my $is_clean_check = shift; #are we running this on dereped data rather than raw reads?
+    my $masterdir      = shift;
+    my $is_clean_check = shift; #deprecated
+    my $mate_base      = shift;
     opendir( MASTER, $masterdir) || die "Can't open $masterdir for read: $!\n";
     my @files = readdir( MASTER );
     closedir MASTER;
@@ -537,11 +587,17 @@ sub _get_fastq_file_names{
     foreach my $read( @files ){
 	if( !$is_clean_check ){
 	    next if( $read !~ m/\.fastq/ &&
-		     $read !~ m/\.fq/    && 
-		     $read !~ m/\_R1\_/ );
+		     $read !~ m/\.fq/    &&
+		     $read !~ m/\.fastq/ &&
+		     $read !~ m/\.fa/    );
+	    if( defined( $mate_base ) ){
+		next if( $read =~ m/${mate_base}/ );
+	    }       	     
 	} else {
 	    next if( $read !~ m/\.fastq/ &&
-		     $read !~ m/\.fq/    );
+		     $read !~ m/\.fq/    &&
+		     $read !~ m/\.fastq/ &&
+		     $read !~ m/\.fa/    );
 	} 
 	my @suffixlist = ( ".gz" );
 	my( $name, $path, $suffix ) = fileparse( $read, @suffixlist );
@@ -569,7 +625,9 @@ sub _run_fastqc{
     my $log_file = File::Spec->catfile( $log_dir, $in_base . ".log" );
     my $cmd = "${fastqc} -o=$result_dir $in_file > $log_file 2>&1";
     print "$cmd\n";
-    system( $cmd );
+    if( system( $cmd ) ){
+	die "GOT AN ERROR RUNNING FASTQC\n";
+    }
 }
 
 sub _run_split_reads{
@@ -579,11 +637,14 @@ sub _run_split_reads{
     my $n_splits    = $args->{"n_splits"};
     my $log_dir     = $args->{"log_dir"};
     my $split_reads = $args->{"split_reads"};
+    my $in_format   = $args->{"in_format"};
     my $file_basename = basename( $in_file );
     my $log_file = File::Spec->catfile( $log_dir, $file_basename . ".log" );
-    my $cmd = "${split_reads} -i ${in_file} -n ${n_splits} -o ${result_dir} > ${log_file} 2>&1";
+    my $cmd = "${split_reads} -i ${in_file} -n ${n_splits} -o ${result_dir} -f $in_format > ${log_file} 2>&1";
     print "$cmd\n";
-    system( $cmd );
+    if( system( $cmd ) ){
+	die "GOT AN ERROR RUNNING SPLIT READS\n";
+    }
 }
 
 
@@ -602,6 +663,7 @@ sub _run_bowtie2{
     my $bowtie2     = $args->{"bowtie2"};
     my $paired_end  = $args->{"paired_end"};
     my $mate_base   = $args->{"mate_basename"};
+    my $in_format   = $args->{"in_format"};
     my @in_suffixes = @{ $args->{"in_suffixes"} };
 
 
@@ -615,9 +677,15 @@ sub _run_bowtie2{
 	my $f_in  = File::Spec->catfile( $in_dir, $f_mate );
 	my $f_base = basename( $read, @in_suffixes ); #this contains the split value!
 	my $r_in;
+	my $split;
+	if( $f_base =~ m/_(\d+)$/ ){
+	    $split = $1;
+	} else {
+	    die "Can't parse split from $f_base\n";
+	}
 	if( $paired_end ){
 	    $r_in  = $f_in;
-	    $r_in     =~ s/$f_base/${mate_base}_${i}/;
+	    $r_in     =~ s/$f_base/${mate_base}_${split}/;
 	}
 	my $f_log = File::Spec->catfile( $log_dir, $f_mate . ".log" );
 	#prepare the output
@@ -639,32 +707,53 @@ sub _run_bowtie2{
 	    #not necessairly conservative, but maybe best for metagenomes? Need to
 	    #test accuracy.
 	    if( $paired_end ){
-		$out_string .= "--un-conc ${out_path} ";
+		$out_string .= "--un-conc ${out_path} --al /dev/null ";
 	    } else { 
-		$out_string .= "--un ${out_path} ";
+		$out_string .= "--un ${out_path} --al /dev/null ";
 	    }	    
 	    $cmd =  "$bowtie2 ";
+	    if( $in_format eq "fasta" ){
+		$cmd .= " -f ";
+	    } else {
+		$cmd .= " -q ";
+	    }
 	    $cmd .= "${out_string} -x ${database} ${input_string} -S /dev/null ";
 	    $cmd .= " &> $f_log";
 	    print "$cmd\n";
-	    system( $cmd );	    
+	    if( system( $cmd ) ){
+		die "GOT AN ERROR RUNNING BOWTIE2\n";
+	    }
 	    #trim the name of the output file to standard to ease next steps. Use a move
 	    if( !$paired_end ){
 		#nothing needs to be done - names are preserved
 	    } 
 	    if( $paired_end ){ 	    #a little awkward with how bowtie renames files
-	    #read 1.
-		my $out_base = basename( $out_path, ".fq" );
-		print $out_base . "\n";
-		my $to_move = File::Spec->catfile( $result_dir, $out_base . ".1.fq" );
-		print $to_move . "\n";
+		#read 1.
+		my $suf;
+		my $suf2;
+		if( $in_format eq "fasta" ){
+		    $suf2 = ".fasta";
+		    $suf  = ".fa";
+		} else {
+		    $suf  = ".fq";
+		    $suf2 = ".fastq";
+		}
+		#my $out_base = basename( $out_path, ".${suf}" );
+		my $out_base = basename( $out_path, "${suf}" );
+		#print $out_base . "\n";
+		my $to_move = File::Spec->catfile( $result_dir, $out_base . ".1${suf}" );
+		#print $to_move . "\n";
 		my $new     = $out_path;
-		print $new . "\n";
+		#print $new . "\n";
 		move( $to_move, $new );
 		#read 2
-		my $to_move2 = File::Spec->catfile( $result_dir, $out_base . ".2.fq" );
+		my $to_move2 = File::Spec->catfile( $result_dir, $out_base . ".2${suf}" );
 		my $new2     = $out_path;
-		$new2        =~ s/$f_base/${mate_base}_${i}/;
+		#print "$mate_base\n";
+		#print "$f_base\n";
+		$new2        =~ s/$f_base/${mate_base}_${split}/;
+		#print "$to_move2\n";
+		#print "$new2\n";
 		move( $to_move2, $new2 );
 	    }
 	}
@@ -690,6 +779,7 @@ sub _run_bmtagger{
     my $bmtagger    = $args->{"bmtagger"};
     my $paired_end  = $args->{"paired_end"};
     my $mate_base   = $args->{"mate_basename"};
+    my $in_format   = $args->{"in_format"};
     my @in_suffixes = @{ $args->{"in_suffixes"} };
 
 
@@ -703,9 +793,15 @@ sub _run_bmtagger{
 	my $f_in  = File::Spec->catfile( $in_dir, $f_mate );
 	my $f_base = basename( $read, @in_suffixes ); #this contains the split value!
 	my $r_in;
+	my $split;
+	if( $f_base =~ m/_(\d+)$/ ){
+	    $split = $1;
+	} else {
+	    die "Can't parse split from $f_base\n";
+	}
 	if( $paired_end ){
 	    $r_in  = $f_in;
-	    $r_in     =~ s/$f_base/${mate_base}_${i}/;
+	    $r_in     =~ s/$f_base/${mate_base}_${split}/;
 	}
 	my $f_log = File::Spec->catfile( $log_dir, $f_mate . ".log" );
 	#prepare the output
@@ -718,18 +814,24 @@ sub _run_bmtagger{
 	    my $srprism  = File::Spec->catfile( $sprism_dir,  $db . ".srprism"  );
 	    my $database = File::Spec->catfile( $sprism_dir,  $db . ".fa" );
 	    my $f_string = "-1 " . $f_in;
-	    my $r_string = "-2 " . $r_in;
+	    my $r_string;
+	    if( $paired_end ){
+		$r_string = "-2 " . $r_in;
+	    }
 	    if( $extract ){
-		#bmtagger.sh -X -b $BITMASK -x $SPRISM -T $TMP -q1 $FREAD $RREAD -o $OUTPUT  >> $LOGS/bmtagger/${JOB_ID}.all 2>&1
-#		$cmd = "run_bmtagger.sh -X -b $bitmask -x $sprism -T $tmp_dir -q1 $f_string $r_string -o $out_path > $f_log 2>&1";
 		$cmd =  "$bmtagger ";
 		$cmd .= "-X ";
-		#$cmd .= "-b $bitmask -x $srprism -T $tmp_dir -d $database ";
 		$cmd .= "-b $bitmask -x $srprism -d $database ";
-		if( $paired_end ){
-		    $cmd .= "-q 1 $f_string $r_string -o $out_path"; 
+		if( $in_format eq "fasta" ){
+		    $cmd .= "-q 0 ";
 		} else {
-		    $cmd .= "-q 1 $f_string -o $out_path" ;
+		    $cmd .= "-q 1 ";
+		}
+		
+		if( $paired_end ){
+		    $cmd .=  "$f_string $r_string -o $out_path"; 
+		} else {
+		    $cmd .= "$f_string -o $out_path" ;
 		}
 	    }
 	    else{
@@ -745,19 +847,36 @@ sub _run_bmtagger{
 	    }
 	    $cmd .= " &> $f_log";
 	    print "$cmd\n";
-	    system( $cmd );	    
+	    if( system( $cmd ) ){
+		die "GOT AN ERROR RUNNING BMTAGGER!\n";
+	    }
 	    #trim the name of the output file to standard to ease next steps. Use a move
 	    #read 1
-	    my $to_move = $out_path . "_1.fastq";
+	    my $suf;
+	    if( $in_format eq "fasta" ){
+		$suf = ".fa";
+	    } else {
+		$suf = ".fastq";
+	    }
+	    my $term = "";
+	    if( $paired_end ){
+		$term = "_1";
+	    }
+	    my $to_move = $out_path . "${term}${suf}";
+	    print $to_move . "\n";
 	    my $new     = $out_path;
+	    print $new . "\n";
+	    $new        =~ s/\.fa\.fa$/\.fa/;
+	    print $new . "\n";
 	    move( $to_move, $new );
 	    #read 2
 	    if( $paired_end ){
-		my $to_move = $out_path . "_2.fastq";
-		my $new     = $to_move;
-		$new        =~ s/$f_base/${mate_base}_${i}/;
-		$new        =~ s/_2\.fastq$//;
-		move( $to_move, $new );
+		my $to_move = $out_path . "_2${suf}";
+		my $new2     = $to_move;
+		$new2        =~ s/$f_base/${mate_base}_${split}/;
+		$new2        =~ s/_2\.[fastq|fasta]$//;
+		$new2        =~ s/\.fa\.fa$/\.fa/;
+		move( $to_move, $new2 );
 	    }
 	}
 	$pm->finish; # Terminates the child process
@@ -798,7 +917,9 @@ sub _run_deconseq{
 	#Start threads
 	$cmd = "$deconseq -id $f_out_name -out_dir $result_dir -f $f_in -dbs $db_string";
 	print "$cmd\n";
-	system( $cmd );
+	if( system( $cmd ) ){
+	    die "GOT AN ERROR RUNNING DECONSEQ!\n";
+	}
 	#trim the name of the output file to standard to ease next steps. Use a move
 	#read 1
 	my $result_stem = File::Spec->catfile( $result_dir, $f_out_name );
@@ -820,22 +941,30 @@ sub _run_deconseq{
 	    my $f_in  = File::Spec->catfile( $in_dir, $f_mate );
 	    my $f_base = basename( $read, @in_suffixes ); #this contains the split value!
 	    my $r_in;
+	    my $split;
+	    if( $f_base =~ m/_(\d+)$/ ){
+		$split = $1;
+	    } else {
+		die "Can't parse split from $f_base\n";
+	    }
 	    if( $paired_end ){
 		$r_in  = $f_in;
-		$r_in     =~ s/$f_base/${mate_base}_${i}/;
+		$r_in     =~ s/$f_base/${mate_base}_${split}/;
 	    }
 	    my $r_out_name = "${mate_base}_${i}";
-	    my $r_log = File::Spec->catfile( $log_dir, "${mate_base}_${i}" . ".log" );
+	    my $r_log = File::Spec->catfile( $log_dir, "${mate_base}_${split}" . ".log" );
 	    #Start threads
 	    $cmd = "$deconseq -id $r_out_name -out_dir $result_dir -f $r_in -dbs $db_string";
 	    print "$cmd\n";
-	    system( $cmd );
+	    if( system( $cmd ) ){
+		die "GOT AN ERROR RUNNING DECONSEQ!\n";
+	    }
 	    #read 2
 	    if( $paired_end ){
 		my $result_stem = File::Spec->catfile( $result_dir, $r_out_name );
 		my $to_move = $result_stem . "_clean.fastq";
 		my $new     = $to_move;
-		$new        =~ s/$f_base/${mate_base}_${i}/;
+		$new        =~ s/$f_base/${mate_base}_${split}/;
 		$new        =~ s/_clean\.fastq$//;
 		move( $to_move, $new );
 	    }
@@ -859,6 +988,7 @@ sub _run_prinseq{
     my $derep       = $args->{"derep"};
     my $paired_end  = $args->{"paired_end"};
     my $mate_base   = $args->{"mate_basename"};
+    my $in_format   = $args->{"in_format"};
     my @in_suffixes = @{ $args->{"in_suffixes"} };
 
     if( ! $derep ){
@@ -871,9 +1001,15 @@ sub _run_prinseq{
 	    my $f_mate = $read;
 	    $f_in  = File::Spec->catfile( $in_dir, $f_mate );
 	    my $f_base = basename( $read, @in_suffixes ); #this contains the split value!
+	    my $split;
+	    if( $f_base =~ m/_(\d+)$/ ){
+		$split = $1;
+	    } else {
+		die "Can't parse split from $f_base\n";
+	    }
 	    if( $paired_end ){
 		$r_in  = $f_in;
-		$r_in     =~ s/$f_base/${mate_base}_${i}/;
+		$r_in     =~ s/$f_base/${mate_base}_${split}/;
 	    }
 	    my $log = File::Spec->catfile( $log_dir, $f_mate . ".log" );
 	    my $out_path = File::Spec->catfile( $result_dir, $read );
@@ -889,8 +1025,8 @@ sub _run_prinseq{
 	    #you might want to turn derep back on here for downstream efficiency, but we turned off for
 	    #courtney's analysis
 	    #$cmd =  "$prinseq -verbose -derep 14 -derep_min 2 -no_qual_header "; #do we want -exact_only?
-	    $cmd .=  "$prinseq -verbose -no_qual_header "; #do we want -exact_only?
-	    $cmd .= "-min_len 60 -max_len 200 -min_qual_mean 25 -ns_max_n 0 ";
+	    $cmd .=  "$prinseq -verbose "; #do we want -exact_only?
+	    $cmd .= "-min_len 60 -min_qual_mean 25 -ns_max_n 0 ";
 	    $cmd .= "-lc_method entropy -lc_threshold 60 -trim_qual_left 20 -trim_qual_right 20 ";
 	    if( $paired_end ){
 		$cmd .= "-out_good $out_path -fastq $f_in -fastq2 $r_in -log $log ";
@@ -905,17 +1041,20 @@ sub _run_prinseq{
 	    $cmd .= "-out_bad null ";
 	    $cmd    .= "&> $log ";
 	    print "$cmd\n";
-	    system( $cmd );
+	    if( system( $cmd ) ){
+		die "GOT AN ERROR RUNNING PRINSEQ!\n";
+	    }
 	    #trim the name of the output file to standard to ease next steps. Use a move
 	    #read 1
 	    my $to_move = $out_path . "_1.fastq";
 	    my $new     = $out_path;
 	    move( $to_move, $new );
+
 	    #read 2
 	    if( $paired_end ){
 		my $to_move = $out_path . "_2.fastq";
 		my $new     = $to_move;
-		$new        =~ s/$f_base/${mate_base}_${i}/;
+		$new        =~ s/$f_base/${mate_base}_${split}/;
 		$new        =~ s/_2\.fastq$//;
 		move( $to_move, $new );
 	    }
@@ -924,7 +1063,11 @@ sub _run_prinseq{
 	$pm->wait_all_children;    
     } else {
 	my $in_file   = $reads[0]; #includes split value!
-	$in_file      =~ s/\_\d+\.fq$/\.fq/; #no longer does
+	if( $in_format eq "fastq" ){
+	    $in_file      =~ s/\_\d+\.fq$/\.fq/; #no longer does
+	} elsif( $in_format ){
+	    $in_file      =~ s/\_\d+\.fa$/\.fa/; #no longer does
+	} else { die ("what am I to do with $in_format\n" ); }
 	my $f_in  = File::Spec->catfile( $in_dir, $in_file );
 	my $f_base = basename( $in_file, @in_suffixes ); #this contains the split value!
 	my $r_in;
@@ -935,30 +1078,42 @@ sub _run_prinseq{
 	my $log      = File::Spec->catfile( $log_dir, $in_file . ".log" );
 	my $out_file = $in_file; #just the file name 
 	my $out_path = File::Spec->catfile( $result_dir, $out_file );
-	my $cmd =  "$prinseq -verbose -derep 14 -derep_min 2 -no_qual_header "; #do we want -exact_only?
+	my $cmd =  "$prinseq -verbose -derep 14 -derep_min 2 "; #do we want -exact_only?
 	#$cmd    .= "-out_good $out_path -fastq $in_path -log $log_path ";
 	if( $paired_end ){
 	    $cmd .= "-out_good $out_path -fastq $f_in -fastq2 $r_in -log $log ";
 	} else {
-	    $cmd .= "-fastq $f_in ";	   
+	    if( $in_format eq "fastq" ){
+		$cmd .= "-fastq $f_in ";	   
+	    } else {
+		$cmd .= "-fasta $f_in ";	   
+	    }
 	    $cmd .= "-out_good $out_path -log $log ";
 	}
 	$cmd    .= "-out_bad null ";
 	$cmd    .= "&> $log ";
 	print "$cmd\n";
-	system( $cmd );	    
+	if( system( $cmd ) ){
+	    die "GOT AN ERROR RUNNING PRINSEQ DEREP!\n";
+	}
 	#trim the name of the output file to standard to ease next steps. Use a move
 	#read 1
-	my $to_move = $out_path . ".fastq";
+	my $suf;
+	if( $in_format eq "fasta" ){
+	    $suf = ".fasta";
+	} else {
+	    $suf = ".fastq";
+	}
+	my $to_move = $out_path . $suf;
 	my $new     = $out_path;
-	$new        =~ s/\.fastq$//;
+	$new        =~ s/${suf}$//;
 	move( $to_move, $new );
 	#read 2
 	if( $paired_end ){
-	    my $to_move = $out_path . ".fastq";
+	    my $to_move = $out_path . $suf;
 	    my $new     = $to_move;
 	    $new        =~ s/$f_base/${mate_base}/;
-	    $new        =~ s/\.fastq$//;
+	    $new        =~ s/${suf}$//;
 	    move( $to_move, $new );
 	}
     }
@@ -983,6 +1138,12 @@ sub _cat_reads{
     #do some work for easy living below
     my $f_base  = basename( $reads[0], @in_suffixes ); #this contains the split value!
     $f_base =~ s/\_\d+$//; #no longer has split value
+    my $suf;
+    if( $in_format eq "fasta" ){
+	$suf = ".fa";
+    } else {
+	$suf = ".fq";
+    }
     #do the work
     if( $paired_end ) {
 	@f_sorted   = @sorted;
@@ -991,19 +1152,25 @@ sub _cat_reads{
 	    s/${f_base}/${mate_base}/;
 	}
 	my $f_out_stem = $f_base;
-	my $f_out_path = File::Spec->catfile( $result_dir, $f_out_stem . ".fq" );
+	my $f_out_path = File::Spec->catfile( $result_dir, $f_out_stem . $suf );
 	print("cat @f_sorted > $f_out_path\n");
-	system("cat @f_sorted > $f_out_path");
+	if( system("cat @f_sorted > $f_out_path") ){
+	    die "ERROR CATTING FORWARD READS\n";
+	}
 	my $r_out_stem = $mate_base;
-	my $r_out_path = File::Spec->catfile( $result_dir, $r_out_stem . ".fq" );
+	my $r_out_path = File::Spec->catfile( $result_dir, $r_out_stem . $suf );
 	print("cat @r_sorted > $r_out_path\n");
-	system("cat @r_sorted > $r_out_path");
+	if( system("cat @r_sorted > $r_out_path") ){
+	    die "ERROR CATTING REVERSE READS\n";
+	}
     } else {
 	@f_sorted    = @sorted;
 	my $out_stem = $f_base;
-	my $out_path = File::Spec->catfile( $result_dir, $out_stem );
+	my $out_path = File::Spec->catfile( $result_dir, $out_stem . $suf );
 	print("cat @f_sorted > $out_path\n");
-	system("cat @f_sorted > $out_path");
+	if( system("cat @f_sorted > $out_path") ){
+	    die "ERROR CATTING READS\n";
+	}
     }
 }
 
@@ -1014,7 +1181,9 @@ sub _cat_reads{
 
 sub _set_settings{
     my ($ra_qc_methods, $ra_trim_methods,
-	$ra_filter_methods, $ra_derep_methods, $out_format ) = @_;
+	$ra_filter_methods, $ra_derep_methods, 
+	$in_format, $out_format,
+	$filter_test ) = @_;   
     my $run_raw_qc   = 1;
     my $split_reads  = 1;
     my $run_trim     = 1;
@@ -1023,8 +1192,20 @@ sub _set_settings{
     my $derep        = 1;
     my $check_qc     = 1;
     my $fasta_cleaned= 1;
+    if( $in_format eq "fasta" ){
+	$run_raw_qc    = 0;
+	$run_trim      = 0;
+	$check_qc      = 0;
+	$ra_trim_methods = ();
+	
+    }
+    if( $filter_test ){
+	$derep       = 0;
+    }
     my $settings = _build_settings($ra_qc_methods, $ra_trim_methods,
-				   $ra_filter_methods, $ra_derep_methods, $out_format ) ;
+				   $ra_filter_methods, $ra_derep_methods, 
+				   $in_format, $out_format,
+				   $filter_test );
     my @params   = ( $run_raw_qc, $split_reads, $run_trim, $run_filter,
 		     $cat_reads, $derep, $check_qc, $fasta_cleaned );
     $settings->{"parameters"} = \@params;
@@ -1033,16 +1214,32 @@ sub _set_settings{
 
 sub _build_settings{
     my ($ra_qc_methods, $ra_trim_methods,
-	$ra_filter_methods, $ra_derep_methods, $out_format ) = @_;
+	$ra_filter_methods, $ra_derep_methods, 
+	$in_format, $out_format,
+	$filter_test ) = @_;
     my @qc_methods     = @{ $ra_qc_methods };
-    my @trim_methods   = @{ $ra_trim_methods };
+    #because we don't trim a fasta file, we have to do a bit of work here
+    #see the $in_format eq "fasta" switch in _set_settings()
+    my @trim_methods;
+    if( defined( $ra_trim_methods ) ){
+	@trim_methods   = @{ $ra_trim_methods };
+    } else {
+	@trim_methods = ();
+    }
     my @filter_methods = @{ $ra_filter_methods };
     my @derep_methods  = @{ $ra_derep_methods };
     my $settings     = ();
     #the order matters here!
-    my @keys = ( @qc_methods, "split_reads", @trim_methods,
-		      @filter_methods, "cat_reads", @derep_methods,
-		      "check_qc", "fasta_cleaned" );
+    my @keys = ();
+    if( $filter_test ){ #run limited methods in pipeline
+	@keys = ( "split_reads",
+		  @filter_methods, "cat_reads",
+		  "check_qc", "fasta_cleaned" );
+    } else { #run the complete
+	@keys = ( @qc_methods, "split_reads", @trim_methods,
+		  @filter_methods, "cat_reads", @derep_methods,
+		  "check_qc", "fasta_cleaned" );
+    }
     for( my $i=0; $i<scalar(@keys); $i++ ){
 	my $key = $keys[$i];
 	if( $key eq "fastqc" ){
@@ -1084,7 +1281,7 @@ sub _get_root{
 
 sub _check_vars{
     my ( $in_fastq,  $pair_fastq, $out_dir, 
-	 $index_dir, $index_basename, $out_format ) = @_;
+	 $index_dir, $index_basename, $in_format, $out_format ) = @_;
     if( !defined $in_fastq ){
 	die( "You must point me to a fastq file using -1\n" );
     }
@@ -1112,8 +1309,13 @@ sub _check_vars{
     }
     if( $out_format ne "fasta" &&
 	$out_format ne "fastq" ){
-	die( "Option -f must be either fasta or fastq. You specified:\n" .
+	die( "Option -of must be either fasta or fastq. You specified:\n" .
 	     $out_format . "\n" );
+    }
+    if( $in_format ne "fasta" &&
+	$in_format ne "fastq" ){
+	die( "Option -if must be either fasta or fastq. You specified:\n" .
+	     $in_format . "\n" );
     }
     my @files = glob( $index_dir . "/" . $index_basename . "*" );
     if( !@files ){
@@ -1174,10 +1376,15 @@ sub _run_fastuniq{
     my @in_suffixes = @{ $args->{"in_suffixes"} };
 
     my $in_file   = $reads[0]; #includes split value!
-    $in_file      =~ s/\_\d+\.fq$/\.fq/; #no longer does
+    if( $in_format eq "fastq" ){
+	$in_file      =~ s/\_\d+\.fq$/\.fq/; #no longer does
+    } elsif( $in_format ){
+	$in_file      =~ s/\_\d+\.fa$/\.fa/; #no longer does
+    } else { die ("what am I to do with $in_format\n" ); }
     my $f_in  = File::Spec->catfile( $in_dir, $in_file );
     my $f_base = basename( $in_file, @in_suffixes ); #this contains the split value!
     my $r_in = $f_in;
+    $r_in =~ s/$f_base/$mate_base/;
     #we have to create an input_list file for fastuniq
     my $input_list = File::Spec->catfile( $tmp_dir, "fu.tmp" );
     open( TMP, ">$input_list" ) || die "Can't write to $input_list: $!\n";
@@ -1188,10 +1395,19 @@ sub _run_fastuniq{
     my $f_out    = File::Spec->catfile( $result_dir, $out_file );
     my $r_out    = $f_out;
     $r_out       =~ s/$f_base/${mate_base}/;
-    my $cmd = "${fastuniq} -i ${input_list} -t q -o ${f_out} -p ${r_out} ";
+
+    my $cmd = "${fastuniq} ";
+    if( $in_format eq "fastq" ){
+	$cmd    .= "-i ${input_list} ";
+    } else {
+	$cmd    .= "-i ${input_list} ";
+    }
+    $cmd    .= "-t q -o ${f_out} -p ${r_out} ";
     $cmd    .= "&> $log ";
     print "$cmd\n";
-    system( $cmd );	    
+    if( system( $cmd ) ){
+	die "GOT AN ERROR RUNNING FASTUNIQ!\n";
+    }	    
 }
 
 sub _run_trimmomatic{
@@ -1206,21 +1422,28 @@ sub _run_trimmomatic{
     my $trimmomatic = $args->{"trimmomatic"};
     my $paired_end  = $args->{"paired_end"};
     my $mate_base   = $args->{"mate_basename"};
+    my $jm          = $args->{"ram"};
     my @in_suffixes = @{ $args->{"in_suffixes"} };
 
     my $pm = Parallel::ForkManager->new($nprocs);
-    for( my $i=0; $i<$nprocs; $i++ ){
+    for( my $i=1; $i<=$nprocs; $i++ ){
 	my $pid = $pm->start and next;
 	#do some housekeeping
-	my $read = $reads[$i];          
+	my $read = $reads[$i-1];          
 	#prepare input files
 	my ( $f_in, $r_in );
 	my $f_mate = $read;
 	$f_in  = File::Spec->catfile( $in_dir, $f_mate );
 	my $f_base = basename( $read, @in_suffixes ); #this contains the split value!
+	my $split;
+	if( $f_base =~ m/_(\d+)$/ ){
+	    $split = $1;
+	} else {
+	    die "Can't parse split from $f_base\n";
+	}
 	if( $paired_end ){
 	    $r_in  = $f_in;
-	    $r_in  =~ s/$f_base/${mate_base}_${i}/;
+	    $r_in  =~ s/$f_base/${mate_base}_${split}/;
 	}
 	#prepare log file
 	my $log = File::Spec->catfile( $log_dir, $f_mate . ".log" );
@@ -1230,7 +1453,7 @@ sub _run_trimmomatic{
 	my( $r_out, $r_single );
 	if( $paired_end ){
 	    $r_out = $f_out;
-	    $r_out     =~ s/$f_base/${mate_base}_${i}/;
+	    $r_out     =~ s/$f_base/${mate_base}_${split}/;
 	    $r_single = $r_out . ".singletons";
 	}
 	my $compressed = 0;	   
@@ -1238,18 +1461,44 @@ sub _run_trimmomatic{
 	if( -e $gz_file ){
 	    $compressed = 1;
 	}
-	my $cmd = "java -jar ${trimmomatic} ";
+	my $cmd = "java -Xmx${jm} -Xms${jm} -jar ${trimmomatic} ";
 	if( $paired_end ){
-	    $cmd .= "PE -phred33 ${f_in} ${r_in} ${f_out} ${f_single} ${r_out} ${r_single} ";
+	    $cmd .= "PE -threads 1 -phred33 ${f_in} ${r_in} ${f_out} ${f_single} ${r_out} ${r_single} ";
 	} else {
-	    $cmd .= "SE -phred33 ${f_in} ${f_out} ";
+	    $cmd .= "SE -threads 1 -phred33 ${f_in} ${f_out} ";
 	}
 	#now all of the thesholds
-	$cmd .= "ILLUMINACLIP:TruSeq3-PE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36";
+	#$cmd .= "ILLUMINACLIP:TruSeq3-PE.fa:2:30:10 ";
+	$cmd .= "LEADING:25 TRAILING:25 SLIDINGWINDOW:4:20 MINLEN:60 ";
 	$cmd    .= "&> $log ";
 	print "$cmd\n";
-	system( $cmd );
+	if( system( $cmd ) ){
+	    die "GOT AN ERROR RUNNING TRIMMOMATIC!\n";
+	}
 	$pm->finish; # Terminates the child process
     }
     $pm->wait_all_children;    
+}
+
+sub _check_in_format{
+    my( $input, $in_format ) = @_;
+    if( $input =~ m/\.gz/ ){
+	open( IN, '-|', 'zcat', $input ) || die "Can't open $input for read: $!\n";
+    } else{
+	open( IN, $input ) || die "Can't open $input for read: $!\n";
+    }
+    my $head = <IN>;
+    my $i;
+    if( $head =~ m/^>/ ){
+	$i = "fasta";
+    } elsif( $head =~ m/^\@/ ){
+	$i = "fastq";
+    } else {
+	die( "Input file $input doesn't look like a fasta or fastq formatted file!\n" );
+    }
+    if( $i ne $in_format ){
+	print( "You specified --if $in_format but this looks you have files of type $i, " .
+	       "so I'm going to use this autodetected format ($i) \n" );
+    }
+    return $i;
 }

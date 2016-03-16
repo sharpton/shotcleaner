@@ -24,6 +24,16 @@ GetOptions(
     "n=s" => \$index_name,
     );
 
+if( !defined( $index_db ) ){
+    die( "You must define the index_db directory with -d\n" );
+}
+if( !defined( $h_genome ) ){
+    die( "You must provide a host genome to index with -i\n" );
+}
+if( !defined( $index_name ) ){
+    die( "You must provide an index_name with -n\n" );
+}
+
 if( $method eq "bowtie2" ){
     my $cmd = "bowtie2-build ${h_genome} ${index_db}/${index_name}";
     print "$cmd\n";
