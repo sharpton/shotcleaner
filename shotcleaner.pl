@@ -673,7 +673,15 @@ sub _run_bowtie2{
 	my $cmd;
 	#do some housekeeping
 	my $read = $reads[$i-1];          
-	my $f_mate = $read;
+	#Begin CGedits
+	my $f_mate;
+	if ( $trim_method_list =~ m/prinseq/ ){
+		$f_mate = "$read.fastq";
+	}else{
+		$f_mate = $read; 
+	} 
+	#my $f_mate = $read;
+	#END cgedits
 	my $f_in  = File::Spec->catfile( $in_dir, $f_mate );
 	my $f_base = basename( $read, @in_suffixes ); #this contains the split value!
 	my $r_in;
@@ -1026,7 +1034,7 @@ sub _run_prinseq{
 	    #courtney's analysis
 	    #$cmd =  "$prinseq -verbose -derep 14 -derep_min 2 -no_qual_header "; #do we want -exact_only?
 	    $cmd .=  "$prinseq -verbose "; #do we want -exact_only?
-	    $cmd .= "-min_len 60 -min_qual_mean 25 -ns_max_n 0 ";
+	    $cmd .= "-min_len 60 -max_len 300 -min_qual_mean 25 -ns_max_n 0 ";
 	    $cmd .= "-lc_method entropy -lc_threshold 60 -trim_qual_left 20 -trim_qual_right 20 ";
 	    if( $paired_end ){
 		$cmd .= "-out_good $out_path -fastq $f_in -fastq2 $r_in -log $log ";
