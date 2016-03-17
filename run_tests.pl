@@ -31,6 +31,8 @@ if( ! -d $output ) {
     `mkdir -p $output`;
 }
 
+my $ap = $master . "/pkg/Trimmomatic-0.35/adapters/NexteraPE-PE.fa";
+
 my $nocompress = 1;
 
 ####
@@ -45,7 +47,7 @@ if( system($cmd1) ){
 #test on a single end data
 ##fastq
 my $out2 = File::Spec->catdir( $output, "single_fastq" ); 
-my $cmd2 = "perl ${master}/shotcleaner.pl -1 ${meta}/single/single.fq.gz -d $idx_db -n $host_name -m bowtie2 --nprocs $nprocs -o $out2";
+my $cmd2 = "perl ${master}/shotcleaner.pl -1 ${meta}/single/single.fq.gz -d $idx_db -n $host_name -m bowtie2 --nprocs $nprocs -o $out2 --adapt-path $ap";
 if( $nocompress ){
     $cmd2 .= " --nocompress ";
 }
@@ -66,7 +68,7 @@ if( system($cmd3) ){
 #test on paired end data
 ##fastq
 my $out4 = File::Spec->catdir( $output, "paired_fastq" ); 
-my $cmd4 = "perl ${master}/shotcleaner.pl -1 ${meta}/paired/fastq/mate_1.fq.gz -2 ${meta}/paired/fastq/mate_2.fq.gz -d $idx_db -n $host_name -m bowtie2 --nprocs $nprocs -o $out4";
+my $cmd4 = "perl ${master}/shotcleaner.pl -1 ${meta}/paired/fastq/mate_1.fq.gz -2 ${meta}/paired/fastq/mate_2.fq.gz -d $idx_db -n $host_name -m bowtie2 --nprocs $nprocs -o $out4 --adapt-path $ap";
 if( $nocompress ){
     $cmd4 .= " --nocompress ";
 }

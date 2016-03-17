@@ -20,6 +20,7 @@ my $pair_fastq; #the mate paired file. Optional.
 my $out_dir;
 my $index_dir;
 my $index_basename;
+my $adapt_path; #path to the adaptor file as defined by trimmomatic
 
 #defaults
 my $nprocs             = 1;
@@ -57,6 +58,7 @@ GetOptions(
     #dev options only
     "filter-test!" => \$filter_test,
     "java-ram=s"   => \$jm,
+    "adapt-path:s" => \$adapt_path,
     );
 
 ### INITIALIZATION
@@ -231,6 +233,7 @@ if( $run_trim ){
 		mate_basename => $mate_basename,
 		in_suffixes   => \@in_suffixes,
 		ram           => $jm,
+		adapt         => $adapt_path,
 		  });		
 	}
     }
@@ -1432,6 +1435,7 @@ sub _run_trimmomatic{
     my $paired_end  = $args->{"paired_end"};
     my $mate_base   = $args->{"mate_basename"};
     my $jm          = $args->{"ram"};
+    my $adapt_path  = $args->{"adapt"};
     my @in_suffixes = @{ $args->{"in_suffixes"} };
 
     my $pm = Parallel::ForkManager->new($nprocs);
@@ -1477,7 +1481,14 @@ sub _run_trimmomatic{
 	    $cmd .= "SE -threads 1 -phred33 ${f_in} ${f_out} ";
 	}
 	#now all of the thesholds
-	$cmd .= "ILLUMINACLIP:TruSeq3-PE.fa:2:30:10 ";
+	if( defined( $adapt_path ) ){
+	    if( -e $adapt_path ){
+		$cmd .= "ILLUMINACLIP:${adapt_path}:2:30:10 ";
+	    } else {
+		die "I can't find an adaptor file at the path specified by --adapt-path. " .
+		    "You gave me ${adapt_path}\n";
+	    }
+	}
 	$cmd .= "LEADING:25 TRAILING:25 SLIDINGWINDOW:4:20 MINLEN:60 ";
 	$cmd    .= "&> $log ";
 	print "$cmd\n";
