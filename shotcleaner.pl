@@ -480,6 +480,7 @@ if( $compress ){
     }
     _compress_results( { 
 	in_dir => File::Spec->catdir( $out_dir, $settings->{"split_reads"}->{"output"}  ),
+	delete => 1,
 		       });
     _compress_results( { 
 	in_dir => File::Spec->catdir( $out_dir, $settings->{"cat_reads"}->{"output"}  ),
@@ -1476,7 +1477,7 @@ sub _run_trimmomatic{
 	    $cmd .= "SE -threads 1 -phred33 ${f_in} ${f_out} ";
 	}
 	#now all of the thesholds
-	#$cmd .= "ILLUMINACLIP:TruSeq3-PE.fa:2:30:10 ";
+	$cmd .= "ILLUMINACLIP:TruSeq3-PE.fa:2:30:10 ";
 	$cmd .= "LEADING:25 TRAILING:25 SLIDINGWINDOW:4:20 MINLEN:60 ";
 	$cmd    .= "&> $log ";
 	print "$cmd\n";
