@@ -10,6 +10,18 @@ testcmds:NA
 srccmds:NA
 installed:bin/trimmomatic-0.35.jar
 
+name:eautils
+download:wget
+x86:https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com/ea-utils/ea-utils.1.1.2-537.tar.gz
+src:https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com/ea-utils/ea-utils.1.1.2-537.tar.gz
+x86stem:ea-utils.1.1.2-537
+srcstem:ea-utils.1.1.2-537
+srcbins:fastq-mcf
+x86bins:fastq-mcf
+testcmds:PREFIX=./ make install
+srccmds:PREFIX=./ make install
+installed:bin/fastq-mcf
+
 name:prinseq
 download:wget
 x86:http://tcpdiag.dl.sourceforge.net/project/prinseq/standalone/prinseq-lite-0.20.4.tar.gz

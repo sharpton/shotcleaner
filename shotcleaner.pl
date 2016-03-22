@@ -20,7 +20,7 @@ my $pair_fastq; #the mate paired file. Optional.
 my $out_dir;
 my $index_dir;
 my $index_basename;
-my $adapt_path; #path to the adaptor file as defined by trimmomatic
+my $adapt_path = File::Spec->catfile( $root, "/pkg/Trimmomatic-0.35/adapters/", "NexteraPE-PE.fa" ); #path to the adaptor file as defined by trimmomatic and fastq-mcf
 
 #defaults
 my $nprocs             = 1;
@@ -28,7 +28,7 @@ my $paired_end         = 0;
 my $compress           = 1;
 my $qc_method_list     = ( "fastqc" );
 #can use comma separated (no whitespace) string to do multiple methods per variable
-my $trim_method_list   = "trimmomatic"; #trimmomatic | prinseq
+my $trim_method_list   = "fastq-mcf"; #fastq-mcf | trimmomatic | prinseq
 my $filter_method_list = "bowtie2"; #bowtie2 | bmtagger (deconseq obsolete)
 #note: we might add fastx_collapser or some other
 #tool for single end data
@@ -121,6 +121,8 @@ if( $filter_test ){
 ### START PIPELINE
 
 print "START: " . scalar(localtime()) . "\n";
+
+$run_raw_qc = 0;
 
 if( $run_raw_qc ){
     foreach my $method( @qc_methods ){
@@ -227,6 +229,29 @@ if( $run_trim ){
 		file_names    => \@reads,
 		log_dir       => $trim_log_dir,
 		result_dir    => $trim_results_dir,
+		nprocs        => $nprocs,
+		overwrite     => $overwrite,
+		paired_end    => $paired_end,
+		mate_basename => $mate_basename,
+		in_suffixes   => \@in_suffixes,
+		ram           => $jm,
+		adapt         => $adapt_path,
+		  });		
+	}
+	if( $method eq "fastq-mcf" ){
+	    my $fqm_in_dir      = File::Spec->catdir( $out_dir, $settings->{"fastq-mcf"}->{"input"} );
+	    my $fqm_results_dir = File::Spec->catdir( $out_dir, $settings->{"fastq-mcf"}->{"output"} );
+	    my $fqm_log_dir     = File::Spec->catdir( $logdir, $settings->{"fastq-mcf"}->{"log"} );
+	    my $fqm_bin         = File::Spec->catfile( $root, "bin", "fastq-mcf" );
+	    make_path( $fqm_results_dir );
+	    make_path( $fqm_log_dir );
+	    print "FASTQ-MCF: " . scalar(localtime()) . "\n";
+	    _run_fastq_mcf( {
+		fastq_mcf     => $fqm_bin,
+		in_dir        => $fqm_in_dir,
+		file_names    => \@reads,
+		log_dir       => $fqm_log_dir,
+		result_dir    => $fqm_results_dir,
 		nprocs        => $nprocs,
 		overwrite     => $overwrite,
 		paired_end    => $paired_end,
@@ -1352,7 +1377,8 @@ sub _parse_method_list{
 	    }
 	} elsif( $type eq "trim" ){
 	    if( $method ne "trimmomatic" && 
-		$method ne "prinseq"     ){
+		$method ne "prinseq"     &&
+		$method ne "fastq-mcf"   ){
 		die( "I don't know how to process $method\n" );
 	    }
 	} elsif( $type eq "filter" ){
@@ -1494,6 +1520,85 @@ sub _run_trimmomatic{
 	print "$cmd\n";
 	if( system( $cmd ) ){
 	    die "GOT AN ERROR RUNNING TRIMMOMATIC!\n";
+	}
+	$pm->finish; # Terminates the child process
+    }
+    $pm->wait_all_children;    
+}
+
+sub _run_fastq_mcf{
+    my( $args ) = @_;
+
+    my $in_dir      = $args->{"in_dir"};
+    my @reads       = @{ $args->{"file_names"} };
+    my $result_dir  = $args->{"result_dir"};
+    my $log_dir     = $args->{"log_dir"};
+    my $nprocs      = $args->{"nprocs"};
+    my $overwrite   = $args->{"overwrite"};
+    my $fastq_mcf   = $args->{"fastq_mcf"};
+    my $paired_end  = $args->{"paired_end"};
+    my $mate_base   = $args->{"mate_basename"};
+    my $jm          = $args->{"ram"};
+    my $adapt_path  = $args->{"adapt"};
+    my @in_suffixes = @{ $args->{"in_suffixes"} };
+
+    my $pm = Parallel::ForkManager->new($nprocs);
+    for( my $i=1; $i<=$nprocs; $i++ ){
+	my $pid = $pm->start and next;
+	#do some housekeeping
+	my $read = $reads[$i-1];          
+	#prepare input files
+	my ( $f_in, $r_in );
+	my $f_mate = $read;
+	$f_in  = File::Spec->catfile( $in_dir, $f_mate );
+	my $f_base = basename( $read, @in_suffixes ); #this contains the split value!
+	my $split;
+	if( $f_base =~ m/_(\d+)$/ ){
+	    $split = $1;
+	} else {
+	    die "Can't parse split from $f_base\n";
+	}
+	if( $paired_end ){
+	    $r_in  = $f_in;
+	    $r_in  =~ s/$f_base/${mate_base}_${split}/;
+	}
+	#prepare log file
+	my $log = File::Spec->catfile( $log_dir, $f_mate . ".log" );
+	#prepare output files
+	my $f_out = File::Spec->catfile( $result_dir, $read );
+	my $f_single = $f_out . ".singletons";
+	my( $r_out, $r_single );
+	if( $paired_end ){
+	    $r_out = $f_out;
+	    $r_out     =~ s/$f_base/${mate_base}_${split}/;
+	    $r_single = $r_out . ".singletons";
+	}
+	my $compressed = 0;	   
+	my $gz_file = File::Spec->catfile( $f_in . ".gz" );
+	if( -e $gz_file ){
+	    $compressed = 1;
+	}
+	my $cmd = "${fastq_mcf} ";       
+	#now all of the thesholds       
+	$cmd .= "-q 25 -u --max-ns 1 -l 60 --qual-mean 25 ";
+	if( defined( $adapt_path ) ){
+	    if( -e $adapt_path ){
+		$cmd .= "${adapt_path} ";
+	    } else {
+		die "I can't find an adaptor file at the path specified by --adapt-path. " .
+		    "You gave me ${adapt_path}\n";
+	    }
+	}
+	if( $paired_end ){
+	    #$cmd .= "PE -threads 1 -phred33 ${f_in} ${r_in} ${f_out} ${f_single} ${r_out} ${r_single} ";
+	    $cmd .=  "-o ${f_out} -o ${r_out} ${f_in} ${r_in} ";
+	} else {
+	    $cmd .= "-o ${f_out} ${f_in} ";
+	}
+	$cmd    .= "&> $log ";
+	print "$cmd\n";
+	if( system( $cmd ) ){
+	    die "GOT AN ERROR RUNNING FASTQ-MCF!\n";
 	}
 	$pm->finish; # Terminates the child process
     }
