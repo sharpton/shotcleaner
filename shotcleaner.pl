@@ -6,6 +6,7 @@
 use strict;
 use File::Basename;
 use File::Copy;
+use File::Copy::Recursive qw( dircopy );
 use File::Path qw( make_path remove_tree );
 use File::Spec;
 use File::Spec::Functions;
@@ -26,6 +27,7 @@ my $adapt_path = File::Spec->catfile( $root, "/pkg/Trimmomatic-0.35/adapters/", 
 my $nprocs             = 1;
 my $paired_end         = 0;
 my $compress           = 1;
+my $nofilter           = 0;
 my $qc_method_list     = ( "fastqc" );
 #can use comma separated (no whitespace) string to do multiple methods per variable
 my $trim_method_list   = "fastq-mcf"; #fastq-mcf | trimmomatic | prinseq
@@ -59,13 +61,14 @@ GetOptions(
     "filter-test!" => \$filter_test,
     "java-ram=s"   => \$jm,
     "adapt-path:s" => \$adapt_path,
+    "nofilter!"    => \$nofilter,
     );
 
 ### INITIALIZATION
 $in_format = _check_in_format( $in_fastq, $in_format );
 _check_vars( $in_fastq,  $pair_fastq,    $out_dir, 
 	     $index_dir, $index_basename, $in_format,
-	     $out_format );
+	     $out_format, $nofilter );
 
 my $mate_basename;
 if( defined( $pair_fastq ) ){
@@ -266,6 +269,12 @@ if( $run_trim ){
 
 if( $run_filter ){
     foreach my $method( @filter_methods ){
+	if( $nofilter ){
+	    my $bowtie_in_dir      = File::Spec->catdir( $out_dir, $settings->{"bowtie2"}->{"input"});
+	    my $bowtie_results_dir = File::Spec->catdir( $out_dir, $settings->{"bowtie2"}->{"output"});	    
+	    dircopy( $bowtie_in_dir, $bowtie_results_dir );
+	    last;
+	}
 	if( $method eq "bowtie2" ){
 	    my $bowtie_in_dir      = File::Spec->catdir( $out_dir, $settings->{"bowtie2"}->{"input"});
 	    my $bowtie_results_dir = File::Spec->catdir( $out_dir, $settings->{"bowtie2"}->{"output"});
@@ -1318,7 +1327,8 @@ sub _get_root{
 
 sub _check_vars{
     my ( $in_fastq,  $pair_fastq, $out_dir, 
-	 $index_dir, $index_basename, $in_format, $out_format ) = @_;
+	 $index_dir, $index_basename, $in_format, 
+	 $out_format, $nofilter ) = @_;
     if( !defined $in_fastq ){
 	die( "You must point me to a fastq file using -1\n" );
     }
@@ -1334,15 +1344,17 @@ sub _check_vars{
     if( !defined( $out_dir ) ){
 	die( "You must specify an output directory with -o\n" );
     }
-    if( !defined( $index_dir ) ){
-	die( "You must specify an index_directory with -d\n" );
-    }
-    if( ! -d $index_dir ){
-	die( "I cannot access the index_directory. You specified:\n" .
-	     $index_dir . "\n" );
-    }
-    if( !defined( $index_basename) ){
-	die( "You must provide an index_basename -n so that I know which genome in index_db to use." );
+    unless( $nofilter ){
+	if( !defined( $index_dir ) ){
+	    die( "You must specify an index_directory with -d\n" );
+	}
+	if( ! -d $index_dir ){
+	    die( "I cannot access the index_directory. You specified:\n" .
+		 $index_dir . "\n" );
+	}
+	if( !defined( $index_basename) ){
+	    die( "You must provide an index_basename -n so that I know which genome in index_db to use." );
+	}
     }
     if( $out_format ne "fasta" &&
 	$out_format ne "fastq" ){
@@ -1354,11 +1366,13 @@ sub _check_vars{
 	die( "Option -if must be either fasta or fastq. You specified:\n" .
 	     $in_format . "\n" );
     }
-    my @files = glob( $index_dir . "/" . $index_basename . "*" );
-    if( !@files ){
-	die( "I cannot located an indexed genome database in the index_directory " .
-	     "using the index_basename you specified, which was\n" .
-	     $index_basename . "\n" );	     
+    unless( $nofilter ){
+	my @files = glob( $index_dir . "/" . $index_basename . "*" );
+	if( !@files ){
+	    die( "I cannot located an indexed genome database in the index_directory " .
+		 "using the index_basename you specified, which was\n" .
+		 $index_basename . "\n" );	     
+	}
     }
 }
 
