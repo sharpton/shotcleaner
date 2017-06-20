@@ -28,6 +28,7 @@ my $nprocs             = 1;
 my $paired_end         = 0;
 my $compress           = 1;
 my $nofilter           = 0;
+my $run_raw_fastqc     = 1;
 my $qc_method_list     = ( "fastqc" );
 #can use comma separated (no whitespace) string to do multiple methods per variable
 my $trim_method_list   = "fastq-mcf"; #fastq-mcf | trimmomatic | prinseq
@@ -43,6 +44,7 @@ my $in_format          = "fastq"; #fasta | fastq
 
 my $filter_test = 0;
 my $jm          = "4G";
+
 GetOptions(
     "1=s"         => \$in_fastq,
     "2:s"         => \$pair_fastq,
@@ -62,6 +64,7 @@ GetOptions(
     "java-ram=s"   => \$jm,
     "adapt-path:s" => \$adapt_path,
     "nofilter!"    => \$nofilter,
+    "run-raw-qc!"  => \$run_raw_fastqc
     );
 
 ### INITIALIZATION
@@ -111,7 +114,7 @@ make_path( $tmp_dir );
 ### GET PIPELINE SETTINGS
 
 my $settings = _set_settings( \@qc_methods, \@trim_methods, 
-			      \@filter_methods, \@derep_methods, $in_format, $out_format,
+			      \@filter_methods, \@derep_methods, $run_raw_fastqc, $in_format, $out_format,
 			      $filter_test );
 my ( $run_raw_qc, $split_reads, $run_trim, $run_filter,
   $cat_reads, $derep, $check_qc, $fasta_cleaned ) = @{ $settings->{"parameters"} };
@@ -512,7 +515,8 @@ if( $compress ){
 		       });
     foreach my $method( @derep_methods ){
 	_compress_results( { 
-	    in_dir => File::Spec->catdir( $out_dir, $settings->{$method}->{"output"}  )
+	    in_dir => File::Spec->catdir( $out_dir, $settings->{$method}->{"output"}  ),
+	    delete => 1,
 			   });
     }
     _compress_results( { 
@@ -1228,9 +1232,10 @@ sub _cat_reads{
 sub _set_settings{
     my ($ra_qc_methods, $ra_trim_methods,
 	$ra_filter_methods, $ra_derep_methods, 
+	$run_raw_fastqc,
 	$in_format, $out_format,
 	$filter_test ) = @_;   
-    my $run_raw_qc   = 1;
+    my $run_raw_qc   = $run_raw_fastqc;
     my $split_reads  = 1;
     my $run_trim     = 1;
     my $run_filter   = 1;
