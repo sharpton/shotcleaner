@@ -107,14 +107,14 @@ if( $algs ){
     print( "The requested items have been installed. If you haven't already, please be sure " .
 	   "to make the following additions to your ~/.bash_profile:\n" .
 	   "###################################\n"               . 
-	   "export PATH=\$PATH:\${root}/bin/\n"         .
-	   "export PERL5LIB=\$PERL5LIB:\${root}/lib/\n" .
+	   "export PATH=\$PATH:${root}/bin/\n"         .
+	   "export PERL5LIB=\$PERL5LIB:${root}/lib/\n" .
 	   "###################################\n" 
 	);
     print( "If you like, you can copy and paste the following command to automate the above entries:\n" . 
 	   "###################################\n"                                         . 
-	   "echo 'export PATH=\$PATH:\${root}/bin/' >> ~/.bash_profile\n"         .
-	   "echo 'export PERL5LIB=\$PERL5LIB:\${root}/lib/' >> ~/.bash_profile\n" .
+	   "echo 'export PATH=\$PATH:${root}/bin/' >> ~/.bash_profile\n"         .
+	   "echo 'export PERL5LIB=\$PERL5LIB:${root}/lib/' >> ~/.bash_profile\n" .
 	   "###################################\n" 
 	);
 }
