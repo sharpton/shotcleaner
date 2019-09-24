@@ -24,8 +24,8 @@ installed:bin/fastq-mcf
 
 name:prinseq
 download:wget
-x86:https://sourceforge.net/projects/prinseq/files/standalone/prinseq-lite-0.20.4.tar.gz/download
-src:https://sourceforge.net/projects/prinseq/files/standalone/prinseq-lite-0.20.4.tar.gz/download
+x86:http://downloads.sourceforge.net/project/prinseq/standalone/prinseq-lite-0.20.4.tar.gz
+src:http://downloads.sourceforge.net/project/prinseq/standalone/prinseq-lite-0.20.4.tar.gz
 x86stem:prinseq-lite-0.20.4
 srcstem:prinseq-lite-0.20.4
 x86bins:prinseq-lite.pl
