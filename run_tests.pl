@@ -1,5 +1,6 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
+use warnings;
 use strict;
 use File::Spec;
 use Cwd 'abs_path';
@@ -31,7 +32,7 @@ if( ! -d $output ) {
     `mkdir -p $output`;
 }
 
-my $ap = $master . "/pkg/Trimmomatic-0.35/adapters/NexteraPE-PE.fa";
+my $ap = $master . "/pkg/Trimmomatic-0.39/adapters/NexteraPE-PE.fa";
 
 my $nocompress = 1;
 
@@ -89,5 +90,27 @@ if( system($cmd5) ){
 
 ##################
 # ADD TESTS HERE
+#test on paired end data
+##fastq
+my $out6 = File::Spec->catdir( $output, "paired_fastq-trimmomatic" );
+my $cmd6 = "perl ${master}/shotcleaner.pl -1 ${meta}/paired/fastq/mate_1.fq.gz -2 ${meta}/paired/fastq/mate_2.fq.gz -d $idx_db -n $host_name -m bowtie2 --nprocs $nprocs -o $out6 --adapt-path $ap --trim trimmomatic";
+if( $nocompress ){
+    $cmd6 .= " --nocompress ";
+}
+print $cmd6 . "\n";
+if( system($cmd6) ){
+    die( "GOT AN ERROR RUNNING  SHOTCLEANER!\n" );
+}
+
+##prinseq
+my $out7 = File::Spec->catdir( $output, "paired_fastq-prinseq" );
+my $cmd7 = "perl ${master}/shotcleaner.pl -1 ${meta}/paired/fastq/mate_1.fq.gz -2 ${meta}/paired/fastq/mate_2.fq.gz -d $idx_db -n $host_name -m bowtie2 --nprocs $nprocs -o $out7 --adapt-path $ap --trim prinseq";
+if( $nocompress ){
+    $cmd7 .= " --nocompress ";
+}
+print $cmd7 . "\n";
+if( system($cmd7) ){
+    die( "GOT AN ERROR RUNNING  SHOTCLEANER!\n" );
+}
 
 print "TESTS COMPLETE!\n";
