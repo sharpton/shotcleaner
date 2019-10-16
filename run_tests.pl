@@ -36,6 +36,7 @@ my $ap = $master . "/pkg/Trimmomatic-0.39/adapters/NexteraPE-PE.fa";
 
 my $nocompress = 1;
 
+
 ####
 # BOWTIE2
 ####
@@ -102,6 +103,28 @@ if( system($cmd6) ){
     die( "GOT AN ERROR RUNNING  SHOTCLEANER!\n" );
 }
 
+##bbduk
+my $out8 = File::Spec->catdir( $output, "paired_fastq-bbduk" );
+my $cmd8 = "perl ${master}/shotcleaner.pl -1 ${meta}/paired/fastq/mate_1.fq.gz -2 ${meta}/paired/fastq/mate_2.fq.gz -d $idx_db -n $host_name -m bowtie2 --nprocs $nprocs -o $out8 --adapt-path $ap --trim bbduk";
+if( $nocompress ){
+    $cmd8 .= " --nocompress ";
+}
+print $cmd8 . "\n";
+if( system($cmd8) ){
+    die( "GOT AN ERROR RUNNING  SHOTCLEANER!\n" );
+}
+
+##atropos
+my $out9 = File::Spec->catdir( $output, "paired_fastq-atropos" );
+my $cmd9 = "perl ${master}/shotcleaner.pl -1 ${meta}/paired/fastq/mate_1.fq.gz -2 ${meta}/paired/fastq/mate_2.fq.gz -d $idx_db -n $host_name -m bowtie2 --nprocs $nprocs -o $out9 --adapt-path $ap --trim atropos";
+if( $nocompress ){
+    $cmd9 .= " --nocompress ";
+}
+print $cmd9 . "\n";
+if( system($cmd9) ){
+    die( "GOT AN ERROR RUNNING  SHOTCLEANER!\n" );
+}
+
 ##prinseq
 my $out7 = File::Spec->catdir( $output, "paired_fastq-prinseq" );
 my $cmd7 = "perl ${master}/shotcleaner.pl -1 ${meta}/paired/fastq/mate_1.fq.gz -2 ${meta}/paired/fastq/mate_2.fq.gz -d $idx_db -n $host_name -m bowtie2 --nprocs $nprocs -o $out7 --adapt-path $ap --trim prinseq";
@@ -112,5 +135,7 @@ print $cmd7 . "\n";
 if( system($cmd7) ){
     die( "GOT AN ERROR RUNNING  SHOTCLEANER!\n" );
 }
+
+
 
 print "TESTS COMPLETE!\n";
