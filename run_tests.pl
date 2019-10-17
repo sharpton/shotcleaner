@@ -136,6 +136,16 @@ if( system($cmd7) ){
     die( "GOT AN ERROR RUNNING  SHOTCLEANER!\n" );
 }
 
+my $out10 = File::Spec->catdir( $output, "paired_fastq-prinseq" );
+my $cmd10 = "perl ${master}/shotcleaner.pl -1 ${meta}/single/single.fq.gz -d $idx_db -n $host_name -m bowtie2 --nprocs $nprocs -o $out10 --adapt-path $ap --trim prinseq";
+if( $nocompress ){
+    $cmd10 .= " --nocompress ";
+}
+print $cmd10 . "\n";
+if( system($cmd10) ){
+    die( "GOT AN ERROR RUNNING  SHOTCLEANER!\n" );
+}
+
 
 
 print "TESTS COMPLETE!\n";
