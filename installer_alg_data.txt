@@ -1,14 +1,14 @@
 name:trimmomatic
 download:wget
-x86:http://www.usadellab.org/cms/uploads/supplementary/Trimmomatic/Trimmomatic-0.35.zip
-src:http://www.usadellab.org/cms/uploads/supplementary/Trimmomatic/Trimmomatic-0.35.zip
-x86stem:Trimmomatic-0.35
-srcstem:Trimmomatic-0.35
-srcbins:trimmomatic-0.35.jar
-x86bins:trimmomatic-0.35.jar
+x86:http://www.usadellab.org/cms/uploads/supplementary/Trimmomatic/Trimmomatic-0.39.zip
+src:http://www.usadellab.org/cms/uploads/supplementary/Trimmomatic/Trimmomatic-0.39.zip
+x86stem:Trimmomatic-0.39
+srcstem:Trimmomatic-0.39
+srcbins:trimmomatic-0.39.jar
+x86bins:trimmomatic-0.39.jar
 testcmds:NA
 srccmds:NA
-installed:bin/trimmomatic-0.35.jar
+installed:bin/trimmomatic-0.39.jar
 
 name:eautils
 download:wget
@@ -18,14 +18,14 @@ x86stem:ea-utils.1.1.2-537
 srcstem:ea-utils.1.1.2-537
 srcbins:fastq-mcf
 x86bins:fastq-mcf
-testcmds:PREFIX=./ make install
-srccmds:PREFIX=./ make install
+testcmds:PREFIX=./ CFLAGS="-O3 -I." CPPFLAGS="-O3 -I." make install
+srccmds:PREFIX=./ CFLAGS="-O3 -I." CPPFLAGS="-O3 -I." make install
 installed:bin/fastq-mcf
 
 name:prinseq
 download:wget
-x86:http://tcpdiag.dl.sourceforge.net/project/prinseq/standalone/prinseq-lite-0.20.4.tar.gz
-src:http://tcpdiag.dl.sourceforge.net/project/prinseq/standalone/prinseq-lite-0.20.4.tar.gz
+x86:http://downloads.sourceforge.net/project/prinseq/standalone/prinseq-lite-0.20.4.tar.gz
+src:http://downloads.sourceforge.net/project/prinseq/standalone/prinseq-lite-0.20.4.tar.gz
 x86stem:prinseq-lite-0.20.4
 srcstem:prinseq-lite-0.20.4
 x86bins:prinseq-lite.pl
@@ -36,10 +36,10 @@ installed:bin/prinseq-lite.pl
 
 name:bowtie2
 download:wget
-x86:http://downloads.sourceforge.net/project/bowtie-bio/bowtie2/2.2.6/bowtie2-2.2.6-linux-x86_64.zip
-src:http://downloads.sourceforge.net/project/bowtie-bio/bowtie2/2.2.6/bowtie2-2.2.6-linux-x86_64.zip
-x86stem:bowtie2-2.2.6
-srcstem:bowtie2-2.2.6
+x86:http://downloads.sourceforge.net/project/bowtie-bio/bowtie2/2.3.5.1/bowtie2-2.3.5.1-linux-x86_64.zip
+src:http://downloads.sourceforge.net/project/bowtie-bio/bowtie2/2.3.5.1/bowtie2-2.3.5.1-linux-x86_64.zip
+x86stem:bowtie2-2.3.5.1-linux-x86_64
+srcstem:bowtie2-2.3.5.1-linux-x86_64
 x86bins:bowtie2;bowtie2-build
 srcbins:bowtie2;bowtie2-build
 testcmds:NA
@@ -84,8 +84,8 @@ installed:bin/seqret
 
 name:fastqc
 download:wget
-x86:http://www.bioinformatics.babraham.ac.uk/projects/fastqc/fastqc_v0.11.4.zip
-src:http://www.bioinformatics.babraham.ac.uk/projects/fastqc/fastqc_v0.11.4.zip
+x86:http://www.bioinformatics.babraham.ac.uk/projects/fastqc/fastqc_v0.11.8.zip
+src:http://www.bioinformatics.babraham.ac.uk/projects/fastqc/fastqc_v0.11.8.zip
 x86stem:FastQC
 srcstem:FastQC
 srcbins:fastqc
@@ -93,3 +93,15 @@ x86bins:fastqc
 testcmds:NA
 srccmds:NA
 installed:bin/fastqc
+
+name:bbduk
+download:wget
+x86:https://sourceforge.net/projects/bbmap/files/BBMap_38.69.tar.gz
+src:https://sourceforge.net/projects/bbmap/files/BBMap_38.69.tar.gz
+x86stem:bbmap
+srcstem:bbmap
+x86bins:bbduk.sh
+srcbins:bbduk.sh
+testcmds:NA
+srccmds:NA
+installed:bin/bbmap.sh

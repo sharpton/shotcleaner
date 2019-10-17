@@ -1,5 +1,6 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
+use warnings;
 use strict;
 use File::Spec;
 use Cwd 'abs_path';
@@ -31,9 +32,10 @@ if( ! -d $output ) {
     `mkdir -p $output`;
 }
 
-my $ap = $master . "/pkg/Trimmomatic-0.35/adapters/NexteraPE-PE.fa";
+my $ap = $master . "/pkg/Trimmomatic-0.39/adapters/NexteraPE-PE.fa";
 
 my $nocompress = 1;
+
 
 ####
 # BOWTIE2
@@ -89,5 +91,61 @@ if( system($cmd5) ){
 
 ##################
 # ADD TESTS HERE
+#test on paired end data
+##fastq
+my $out6 = File::Spec->catdir( $output, "paired_fastq-trimmomatic" );
+my $cmd6 = "perl ${master}/shotcleaner.pl -1 ${meta}/paired/fastq/mate_1.fq.gz -2 ${meta}/paired/fastq/mate_2.fq.gz -d $idx_db -n $host_name -m bowtie2 --nprocs $nprocs -o $out6 --adapt-path $ap --trim trimmomatic";
+if( $nocompress ){
+    $cmd6 .= " --nocompress ";
+}
+print $cmd6 . "\n";
+if( system($cmd6) ){
+    die( "GOT AN ERROR RUNNING  SHOTCLEANER!\n" );
+}
+
+##bbduk
+my $out8 = File::Spec->catdir( $output, "paired_fastq-bbduk" );
+my $cmd8 = "perl ${master}/shotcleaner.pl -1 ${meta}/paired/fastq/mate_1.fq.gz -2 ${meta}/paired/fastq/mate_2.fq.gz -d $idx_db -n $host_name -m bowtie2 --nprocs $nprocs -o $out8 --adapt-path $ap --trim bbduk";
+if( $nocompress ){
+    $cmd8 .= " --nocompress ";
+}
+print $cmd8 . "\n";
+if( system($cmd8) ){
+    die( "GOT AN ERROR RUNNING  SHOTCLEANER!\n" );
+}
+
+##atropos
+my $out9 = File::Spec->catdir( $output, "paired_fastq-atropos" );
+my $cmd9 = "perl ${master}/shotcleaner.pl -1 ${meta}/paired/fastq/mate_1.fq.gz -2 ${meta}/paired/fastq/mate_2.fq.gz -d $idx_db -n $host_name -m bowtie2 --nprocs $nprocs -o $out9 --adapt-path $ap --trim atropos";
+if( $nocompress ){
+    $cmd9 .= " --nocompress ";
+}
+print $cmd9 . "\n";
+if( system($cmd9) ){
+    die( "GOT AN ERROR RUNNING  SHOTCLEANER!\n" );
+}
+
+##prinseq
+my $out7 = File::Spec->catdir( $output, "paired_fastq-prinseq" );
+my $cmd7 = "perl ${master}/shotcleaner.pl -1 ${meta}/paired/fastq/mate_1.fq.gz -2 ${meta}/paired/fastq/mate_2.fq.gz -d $idx_db -n $host_name -m bowtie2 --nprocs $nprocs -o $out7 --adapt-path $ap --trim prinseq";
+if( $nocompress ){
+    $cmd7 .= " --nocompress ";
+}
+print $cmd7 . "\n";
+if( system($cmd7) ){
+    die( "GOT AN ERROR RUNNING  SHOTCLEANER!\n" );
+}
+
+my $out10 = File::Spec->catdir( $output, "paired_fastq-prinseq" );
+my $cmd10 = "perl ${master}/shotcleaner.pl -1 ${meta}/single/single.fq.gz -d $idx_db -n $host_name -m bowtie2 --nprocs $nprocs -o $out10 --adapt-path $ap --trim prinseq";
+if( $nocompress ){
+    $cmd10 .= " --nocompress ";
+}
+print $cmd10 . "\n";
+if( system($cmd10) ){
+    die( "GOT AN ERROR RUNNING  SHOTCLEANER!\n" );
+}
+
+
 
 print "TESTS COMPLETE!\n";

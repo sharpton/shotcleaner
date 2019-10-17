@@ -1,8 +1,10 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 # Inspiration: http://www.hmpdacc.org/doc/ReadProcessing_SOP.pdf
 # And: http://bioinformatics.oxfordjournals.org/content/suppl/2011/12/12/btr669.DC1/SupplementaryFile1.pdf
+# Set tabstop=8
 
+use warnings;
 use strict;
 use File::Basename;
 use File::Copy;
@@ -16,12 +18,14 @@ use Data::Dumper;
 use Getopt::Long;
 
 my $root = _get_root();
+print $root;
 my $in_fastq;
 my $pair_fastq; #the mate paired file. Optional.
 my $out_dir;
 my $index_dir;
 my $index_basename;
-my $adapt_path = File::Spec->catfile( $root, "/pkg/Trimmomatic-0.35/adapters/", "NexteraPE-PE.fa" ); #path to the adaptor file as defined by trimmomatic and fastq-mcf
+my $adapt_path = File::Spec->catfile( $root, "/pkg/Trimmomatic-0.39/adapters/", "NexteraPE-PE.fa" ); #path to the adaptor file as defined by trimmomatic and fastq-mcf
+my $bbduk_adapt = File::Spec->catfile( $root, "/pkg/bbmap/resources/", "nextera.fa.gz"); # Adapter file for bbduk
 
 #defaults
 my $nprocs             = 1;
@@ -31,16 +35,19 @@ my $nofilter           = 0;
 my $run_raw_fastqc     = 1;
 my $qc_method_list     = ( "fastqc" );
 #can use comma separated (no whitespace) string to do multiple methods per variable
-my $trim_method_list   = "fastq-mcf"; #fastq-mcf | trimmomatic | prinseq
+my $trim_method_list   = "fastq-mcf"; #fastq-mcf | trimmomatic | prinseq | bbduk | atropos
 my $filter_method_list = "bowtie2"; #bowtie2 | bmtagger (deconseq obsolete)
 #note: we might add fastx_collapser or some other
 #tool for single end data
 my $derep_method_list  =  "fastuniq"; #fastuniq | prinseq-derep
 my $overwrite          = 1; #for now, assume the user is aware
-my @in_suffixes        = ( ".fq", ".fastq", ".fq.gz", ".fastq.gz", 
+my @in_suffixes        = ( ".fq", ".fastq", ".fq.gz", ".fastq.gz",
 			   ".fa", ".fasta", ".fa.gz", ".fasta.gz" ); #useful for basename
-my $out_format         = "fasta"; #fasta | fastq
+my $out_format         = "fastq"; #fasta | fastq
 my $in_format          = "fastq"; #fasta | fastq
+
+# Added by Ed 20190930
+my $local_perl         = 1;
 
 my $filter_test = 0;
 my $jm          = "4G";
@@ -69,7 +76,7 @@ GetOptions(
 
 ### INITIALIZATION
 $in_format = _check_in_format( $in_fastq, $in_format );
-_check_vars( $in_fastq,  $pair_fastq,    $out_dir, 
+_check_vars( $in_fastq,  $pair_fastq,    $out_dir,
 	     $index_dir, $index_basename, $in_format,
 	     $out_format, $nofilter );
 
@@ -90,7 +97,7 @@ if( $derep_method_list =~ m/fastuniq/ ){
     } elsif( $in_format eq "fasta" ){
 	print( "FastUniq current doesn't work with fasta sequences. I am switching to " .
 	       "--derep prinseq-derep " .
-	       "for you.\n");       
+	       "for you.\n");
 	$derep_method_list = "prinseq-derep";
     }
 }
@@ -113,8 +120,9 @@ make_path( $tmp_dir );
 
 ### GET PIPELINE SETTINGS
 
-my $settings = _set_settings( \@qc_methods, \@trim_methods, 
-			      \@filter_methods, \@derep_methods, $run_raw_fastqc, $in_format, $out_format,
+my $settings = _set_settings( \@qc_methods, \@trim_methods,
+			      \@filter_methods, \@derep_methods,
+                              $run_raw_fastqc, $in_format, $out_format,
 			      $filter_test );
 my ( $run_raw_qc, $split_reads, $run_trim, $run_filter,
   $cat_reads, $derep, $check_qc, $fasta_cleaned ) = @{ $settings->{"parameters"} };
@@ -122,7 +130,6 @@ my ( $run_raw_qc, $split_reads, $run_trim, $run_filter,
 if( $filter_test ){
     @derep_methods = ();
 }
- 
 
 ### START PIPELINE
 
@@ -136,7 +143,7 @@ if( $run_raw_qc ){
 	    my $fastqc_result_dir = File::Spec->catdir( $out_dir, "/fastqc_raw/" );
 	    my $fastqc_log_dir    = File::Spec->catdir( $logdir, "/fastqc_raw/" );
 	    my $fastqc_bin        = File::Spec->catfile( $root, "bin", "fastqc" );
-	    my @files; 
+	    my @files;
 	    make_path( $fastqc_result_dir );
 	    make_path( $fastqc_log_dir );
 	    if( $paired_end ){
@@ -147,10 +154,11 @@ if( $run_raw_qc ){
 	    print "FASTQC: " . scalar(localtime()) . "\n";
 	    foreach my $file( @files ){
 		_run_fastqc( {
-		    in_file     => $file, 
-		    result_dir  => $fastqc_result_dir, 
-		    log_dir     => $fastqc_log_dir, 
+		    in_file     => $file,
+		    result_dir  => $fastqc_result_dir,
+		    log_dir     => $fastqc_log_dir,
 		    fastqc      => $fastqc_bin,
+            nprocs      => $nprocs,
 			     }
 		    );
 	    }
@@ -171,7 +179,7 @@ if( $split_reads ){
     _run_split_reads( {
 	in_seqs     => $split_reads_input,
 	result_dir  => $split_reads_dir,
-	n_splits    => $nprocs,	
+	n_splits    => $nprocs,
 	log_dir     => $split_log_dir,
 	split_reads => $split_reads_bin,
 	in_format   => $in_format,
@@ -183,7 +191,7 @@ if( $split_reads ){
 	_run_split_reads( {
 	    in_seqs     => $split_pair_input,
 	    result_dir  => $split_pair_dir,
-	    n_splits    => $nprocs,	
+	    n_splits    => $nprocs,
 	    log_dir     => $split_log_dir,
 	    split_reads => $split_reads_bin,
 	    in_format   => $in_format,
@@ -219,13 +227,17 @@ if( $run_trim ){
 		paired_end    => $paired_end,
 		mate_basename => $mate_basename,
 		in_suffixes   => \@in_suffixes,
-		  });	
+		in_format     => $in_format,
+			  });
 	}
 	if( $method eq "trimmomatic" ){
 	    my $trim_in_dir      = File::Spec->catdir( $out_dir, $settings->{"trimmomatic"}->{"input"} );
 	    my $trim_results_dir = File::Spec->catdir( $out_dir, $settings->{"trimmomatic"}->{"output"} );
 	    my $trim_log_dir     = File::Spec->catdir( $logdir, $settings->{"trimmomatic"}->{"log"} );
-	    my $trim_bin              = File::Spec->catfile( $root, "bin", "trimmomatic-0.35.jar" );
+        # my $trim_bin         = File::Spec->catfile( $root, "bin", "trimmomatic-0.35.jar" );
+	    my $trim_bin         = File::Spec->catfile( $root, "bin", "trimmomatic-*.jar" );
+            my @trim_bins = glob qq("${trim_bin}");
+            $trim_bin = $trim_bins[0];
 	    make_path( $trim_results_dir );
 	    make_path( $trim_log_dir );
 	    print "TRIMMOMATIC: " . scalar(localtime()) . "\n";
@@ -242,7 +254,7 @@ if( $run_trim ){
 		in_suffixes   => \@in_suffixes,
 		ram           => $jm,
 		adapt         => $adapt_path,
-		  });		
+			      });
 	}
 	if( $method eq "fastq-mcf" ){
 	    my $fqm_in_dir      = File::Spec->catdir( $out_dir, $settings->{"fastq-mcf"}->{"input"} );
@@ -265,7 +277,54 @@ if( $run_trim ){
 		in_suffixes   => \@in_suffixes,
 		ram           => $jm,
 		adapt         => $adapt_path,
-		  });		
+			    });
+	}
+	if( $method eq "bbduk" ){
+	    my $bbduk_in_dir      = File::Spec->catdir( $out_dir, $settings->{"bbduk"}->{"input"} );
+	    my $bbduk_results_dir = File::Spec->catdir( $out_dir, $settings->{"bbduk"}->{"output"} );
+	    my $bbduk_log_dir     = File::Spec->catdir( $logdir, $settings->{"bbduk"}->{"log"} );
+	    my $bbduk_bin         = File::Spec->catfile( $root, "bin", "bbduk.sh" );
+	    make_path( $bbduk_results_dir );
+	    make_path( $bbduk_log_dir );
+	    print "BBDUK: " . scalar(localtime()) . "\n";
+	    _run_bbduk( {
+		bbduk         => $bbduk_bin,
+		in_dir        => $bbduk_in_dir,
+		file_names    => \@reads,
+		log_dir       => $bbduk_log_dir,
+		result_dir    => $bbduk_results_dir,
+		nprocs        => $nprocs,
+		overwrite     => $overwrite,
+		paired_end    => $paired_end,
+		mate_basename => $mate_basename,
+		in_suffixes   => \@in_suffixes,
+		ram           => $jm,
+		adapt         => $bbduk_adapt,
+			});
+	}
+	if( $method eq "atropos" ){
+	    my $atropos_in_dir      = File::Spec->catdir( $out_dir, $settings->{"atropos"}->{"input"} );
+	    my $atropos_results_dir = File::Spec->catdir( $out_dir, $settings->{"atropos"}->{"output"} );
+	    my $atropos_log_dir     = File::Spec->catdir( $logdir, $settings->{"atropos"}->{"log"} );
+        # Expects system install
+	    my $atropos_bin         = 'atropos';
+	    make_path( $atropos_results_dir );
+	    make_path( $atropos_log_dir );
+	    print "ATROPOS: " . scalar(localtime()) . "\n";
+	    _run_atropos( {
+		atropos       => $atropos_bin,
+		in_dir        => $atropos_in_dir,
+		file_names    => \@reads,
+		log_dir       => $atropos_log_dir,
+		result_dir    => $atropos_results_dir,
+		nprocs        => $nprocs,
+		overwrite     => $overwrite,
+		paired_end    => $paired_end,
+		mate_basename => $mate_basename,
+		in_suffixes   => \@in_suffixes,
+		ram           => $jm,
+		adapt         => $adapt_path,
+			  });
 	}
     }
 }
@@ -274,7 +333,7 @@ if( $run_filter ){
     foreach my $method( @filter_methods ){
 	if( $nofilter ){
 	    my $bowtie_in_dir      = File::Spec->catdir( $out_dir, $settings->{"bowtie2"}->{"input"});
-	    my $bowtie_results_dir = File::Spec->catdir( $out_dir, $settings->{"bowtie2"}->{"output"});	    
+	    my $bowtie_results_dir = File::Spec->catdir( $out_dir, $settings->{"bowtie2"}->{"output"});
 	    dircopy( $bowtie_in_dir, $bowtie_results_dir );
 	    last;
 	}
@@ -289,10 +348,10 @@ if( $run_filter ){
 	    print "BOWTIE2: " . scalar(localtime()) . "\n";
 	    _run_bowtie2( {
 		bowtie2     => $bowtie_bin,
-		in_dir      => $bowtie_in_dir, 
-		file_names  => \@reads, 
-		result_dir  => $bowtie_results_dir, 
-		log_dir     => $bowtie_log_dir, 
+		in_dir      => $bowtie_in_dir,
+		file_names  => \@reads,
+		result_dir  => $bowtie_results_dir,
+		log_dir     => $bowtie_log_dir,
 		nprocs      => $nprocs,
 		index_dir   => $index_dir,
 		tmp_dir     => $tmp_dir,
@@ -302,7 +361,7 @@ if( $run_filter ){
 		mate_basename => $mate_basename,
 		in_suffixes   => \@in_suffixes,
 		in_format     => $in_format,
-			   });       	    
+			   });
 	}
 	if( $method eq "bmtagger" ){
 	    my $bmtagger_in_dir      = File::Spec->catdir( $out_dir, $settings->{"bmtagger"}->{"input"});
@@ -316,10 +375,10 @@ if( $run_filter ){
 	    print "BMTAGGER: " . scalar(localtime()) . "\n";
 	    _run_bmtagger( {
 		bmtagger    => $bmtagger_bin,
-		in_dir      => $bmtagger_in_dir, 
-		file_names  => \@reads, 
-		result_dir  => $bmtagger_results_dir, 
-		log_dir     => $bmtagger_log_dir, 
+		in_dir      => $bmtagger_in_dir,
+		file_names  => \@reads,
+		result_dir  => $bmtagger_results_dir,
+		log_dir     => $bmtagger_log_dir,
 		nprocs      => $nprocs,
 		bitmask_dir => $index_dir,
 		srprism_dir => $index_dir,
@@ -331,12 +390,12 @@ if( $run_filter ){
 		mate_basename => $mate_basename,
 		in_suffixes   => \@in_suffixes,
 		in_format     => $in_format,
-			   });       
+			   });
 	}
 	#note that deconseq doesn't seem to currently support mate_paired data
 	#also, it is challenging to automate the deconseq config file
 	#finally, an update to bwa now breaks deconseq in our hands (change in the output produced
- 	#by bwa index). 
+ 	#by bwa index).
 	#given the above, we do not currently support deconseq.
 	if( $method eq "deconseq" ){
 	    my $deconseq_in_dir      = File::Spec->catdir( $out_dir, $settings->{"deconseq"}->{"input"} );
@@ -350,14 +409,14 @@ if( $run_filter ){
             #in some place like /src/deconseq-standalone-0.4.3/DeconSeqConfig.pm
 	    make_path( $deconseq_results_dir );
 	    make_path( $deconseq_log_dir );
-	    
+
 	    print "DECONSEQ: " . scalar(localtime()) . "\n";
 	    _run_deconseq( {
 		deconseq    => $deconseq_bin,
-		in_dir      => $deconseq_in_dir, 
-		file_names  => \@reads, 
+		in_dir      => $deconseq_in_dir,
+		file_names  => \@reads,
 		result_dir  => $deconseq_results_dir,
-		log_dir     => $deconseq_log_dir, 
+		log_dir     => $deconseq_log_dir,
 		nprocs      => $nprocs,
 		tmp_dir     => $tmp_dir,
 		db_names    => \@db_names,
@@ -366,7 +425,7 @@ if( $run_filter ){
 		mate_basename => $mate_basename,
 		in_suffixes   => \@in_suffixes,
 			   });
-	    
+
 	}
     }
 }
@@ -378,14 +437,14 @@ if( $cat_reads ){
     make_path( $cat_reads_results_dir );
     my $cat_reads_log = File::Spec->catdir( $logdir, $settings->{"cat_reads"}->{"log"} );
     make_path( $cat_reads_log );
-        
+
     print "CATTING READS: " . scalar(localtime()) . "\n";
     _cat_reads( {
 	in_dir     => $cat_reads_in_dir,
 	file_names => \@reads,
 	log_dir    => $cat_reads_log,
 	result_dir => $cat_reads_results_dir,
-	nprocs     => $nprocs,	
+	nprocs     => $nprocs,
 	paired_end => $paired_end,
 	mate_basename => $mate_basename,
 	in_suffixes   => \@in_suffixes,
@@ -401,7 +460,7 @@ if( @derep_methods ){
 	    my $fu_bin         = File::Spec->catfile( $root, "bin", "fastuniq" );
 	    make_path( $fu_results_dir );
 	    make_path( $fu_log_dir );
-	    
+
 	    print "FASTUNIQ: " . scalar(localtime()) . "\n";
 	    _run_fastuniq( {
 		fastuniq   => $fu_bin,
@@ -416,7 +475,7 @@ if( @derep_methods ){
 		mate_basename => $mate_basename,
 		in_suffixes   => \@in_suffixes,
 		in_format     => $in_format,
-			  });	
+			   });
 	}
 	if( $method eq "prinseq-derep" ){
 	    my $prinseq_derep_in_dir     = File::Spec->catdir( $out_dir, $settings->{"prinseq-derep"}->{"input"} );
@@ -425,7 +484,7 @@ if( @derep_methods ){
 	    my $prinseq_bin               = File::Spec->catfile( $root, "bin", "prinseq-lite.pl" );
 	    make_path( $prinseq_derep_results_dir );
 	    make_path( $prinseq_derep_log_dir );
-        
+
 	    print "PRINSEQ, DEREP: " . scalar(localtime()) . "\n";
 	    _run_prinseq( {
 		prinseq    => $prinseq_bin,
@@ -436,6 +495,7 @@ if( @derep_methods ){
 		nprocs     => $nprocs,
 		overwrite  => $overwrite,
 		derep      => 1,
+		paired_end    => $paired_end,
 		mate_basename => $mate_basename,
 		in_suffixes   => \@in_suffixes,
 		in_format     => $in_format,
@@ -449,16 +509,16 @@ if( $check_qc ){
     my $fastqc_clean_results_dir = File::Spec->catdir( $out_dir, $settings->{"check_qc"}->{"output"});
     my $fastqc_clean_log_dir     = File::Spec->catdir( $logdir, $settings->{"check_qc"}->{"log"} );
     my $fastqc_bin               = File::Spec->catfile( $root, "bin", "fastqc" );
-    my @files; 
-    make_path( $fastqc_clean_results_dir ); 
+    my @files;
+    make_path( $fastqc_clean_results_dir );
     make_path( $fastqc_clean_log_dir );
 
     print "FASTQC, CLEAN: " . scalar(localtime()) . "\n";
-    my $in_base = basename( $in_fastq, @in_suffixes ); 
+    my $in_base = basename( $in_fastq, @in_suffixes );
     my $in_fastq = File::Spec->catfile( $fastqc_clean_in_dir, $in_base . ".fq" );
     if( $paired_end ){
 	my $in_pair = $in_fastq;
-	$in_pair    =~ s/${in_base}/${mate_basename}/;	   
+	$in_pair    =~ s/${in_base}/${mate_basename}/;
 	@files = ( $in_fastq, $in_pair );
     } else {
 	@files = ( $in_fastq );
@@ -466,75 +526,76 @@ if( $check_qc ){
     print "FASTQC: " . scalar(localtime()) . "\n";
     foreach my $file( @files ){
 	_run_fastqc( {
-	    in_file     => $file, 
-	    result_dir  => $fastqc_clean_results_dir, 
-	    log_dir     => $fastqc_clean_log_dir, 
+	    in_file     => $file,
+	    result_dir  => $fastqc_clean_results_dir,
+	    log_dir     => $fastqc_clean_log_dir,
 	    fastqc      => $fastqc_bin,
-		     }
-	    );
+	    nprocs      => $nprocs,
+		     });
     }
 }
 
-if( $fasta_cleaned ){    
+if( $fasta_cleaned ){
     print "PRODUCING OUTPUT: " . scalar(localtime()) . "\n";
     if( $out_format eq "fastq" ){
 	my $fastq_in_dir      = File::Spec->catdir( $out_dir, $settings->{"fasta_cleaned"}->{"input"}  );
-	my $fastq_results_dir = File::Spec->catdir( $out_dir, $settings->{"fasta_cleaned"}->{"output"} );	
-	print "cp ${fastq_in_dir}/*.fq ${fastq_results_dir}\n";	
-	`cp ${fastq_in_dir}/*.fq ${fastq_results_dir}`;	
-    } else {    
+	my $fastq_results_dir = File::Spec->catdir( $out_dir, $settings->{"fasta_cleaned"}->{"output"} );
+	make_path( $fastq_results_dir );
+	print "cp ${fastq_in_dir}/*.fq ${fastq_results_dir}\n";
+	`cp ${fastq_in_dir}/*.fq ${fastq_results_dir}`;
+    } else {
 	my $fasta_in_dir      = File::Spec->catdir( $out_dir, $settings->{"fasta_cleaned"}->{"input"}  );
 	my $fasta_results_dir = File::Spec->catdir( $out_dir, $settings->{"fasta_cleaned"}->{"output"} );
 	my $fasta_log_dir     = File::Spec->catdir( $logdir, $settings->{"fasta_cleaned"}->{"log"} );
 	my $seqret_bin        = File::Spec->catfile( $root, "bin", "seqret" );
 	make_path( $fasta_results_dir );
 	make_path( $fasta_log_dir );
-	if( $in_format eq "fastq" ){	    
+	if( $in_format eq "fastq" ){
 	    print "SEQRET: " . scalar(localtime()) . "\n";
 	    _run_seqret( {
 		in_dir      => $fasta_in_dir,
-		file_names  => \@reads, 
-		result_dir  => $fasta_results_dir, 
-		log_dir     => $fasta_log_dir, 
+		file_names  => \@reads,
+		result_dir  => $fasta_results_dir,
+		log_dir     => $fasta_log_dir,
 		nprocs      => 1,
 		seqret      => $seqret_bin,
 		mate_basename => $mate_basename,
-		in_suffixes   => \@in_suffixes,		    
+		in_suffixes   => \@in_suffixes,
 			 });
 	} else {
-	    print "cp ${fasta_in_dir}/*.fa ${fasta_results_dir}\n";	
-	    `cp ${fasta_in_dir}/*.fa ${fasta_results_dir}`;	
+	    print "cp ${fasta_in_dir}/*.fa ${fasta_results_dir}\n";
+	    `cp ${fasta_in_dir}/*.fa ${fasta_results_dir}`;
 	}
-    } 
+    }
 }
 
 if( $compress ){
     print "COMPRESSING DATA: " . scalar(localtime()) . "\n";
-    _compress_results( { 
+    _compress_results( {
 	in_dir => File::Spec->catdir( $out_dir, $settings->{"fasta_cleaned"}->{"output"}  )
 		       });
     foreach my $method( @derep_methods ){
-	_compress_results( { 
+	_compress_results( {
 	    in_dir => File::Spec->catdir( $out_dir, $settings->{$method}->{"output"}  ),
 	    delete => 1,
 			   });
     }
-    _compress_results( { 
+    _compress_results( {
 	in_dir => File::Spec->catdir( $out_dir, $settings->{"split_reads"}->{"output"}  ),
 	delete => 1,
 		       });
-    _compress_results( { 
+    _compress_results( {
 	in_dir => File::Spec->catdir( $out_dir, $settings->{"cat_reads"}->{"output"}  ),
 	delete => 1,
 		       });
     foreach my $method( @trim_methods ){
-	_compress_results( { 
+	_compress_results( {
 	    in_dir => File::Spec->catdir( $out_dir, $settings->{$method}->{"output"}  ),
 	    delete => 1,
 		       });
     }
     foreach my $method( @filter_methods ){
-	_compress_results( { 
+	_compress_results( {
 	    in_dir => File::Spec->catdir( $out_dir, $settings->{$method}->{"output"}  ),
 	    delete => 1,
 			   })
@@ -551,7 +612,7 @@ print "STOP: " . scalar(localtime()) . "\n";
 
 sub _run_seqret{
     my $args = shift;
-    
+
     my $in_dir     = $args->{"in_dir"};
     my @reads      = @{ $args->{"file_names"} };
     my $result_dir = $args->{"result_dir"};
@@ -569,7 +630,7 @@ sub _run_seqret{
 	my $f_in  = File::Spec->catfile( $in_dir, $in_file );
 	my $f_base = basename( $in_file, @in_suffixes ); #this contains the split value!
 	my $f_log = File::Spec->catfile( $log_dir, $f_base . ".log" );
-	my $outseq = File::Spec->catfile( $result_dir, $f_base . ".fa" );	
+	my $outseq = File::Spec->catfile( $result_dir, $f_base . ".fa" );
 	$cmd = "$seqret -sequence $f_in -outseq $outseq -sformat1 fastq -osformat2 fasta &> $f_log";
 	print "$cmd\n";
 	if( system( $cmd ) ){
@@ -581,7 +642,7 @@ sub _run_seqret{
 	    $r_in  =~ s/$f_base/${mate_base}/;
 	    my $r_base  = basename( $r_in, @in_suffixes );
 	    my $r_log   = File::Spec->catfile( $log_dir, $r_base . ".log" );
-	    my $routseq = File::Spec->catfile( $result_dir, $r_base . ".fa" );	
+	    my $routseq = File::Spec->catfile( $result_dir, $r_base . ".fa" );
 	    my $rcmd = "$seqret -sequence $r_in -outseq $routseq -sformat1 fastq -osformat2 fasta &> $r_log";
 	    print "$rcmd\n";
 	    if( system( $rcmd ) ){
@@ -594,7 +655,7 @@ sub _run_seqret{
 
 sub _compress_results{
     my $args = shift;
-    
+
     my $in_dir = $args->{"in_dir"};
     my $delete = $args->{"delete"};
 
@@ -625,7 +686,7 @@ sub _get_fastq_file_names{
     opendir( MASTER, $masterdir) || die "Can't open $masterdir for read: $!\n";
     my @files = readdir( MASTER );
     closedir MASTER;
-    my @reads = (); 
+    my @reads = ();
     foreach my $read( @files ){
 	if( !$is_clean_check ){
 	    next if( $read !~ m/\.fastq/ &&
@@ -634,13 +695,13 @@ sub _get_fastq_file_names{
 		     $read !~ m/\.fa/    );
 	    if( defined( $mate_base ) ){
 		next if( $read =~ m/${mate_base}/ );
-	    }       	     
+	    }
 	} else {
 	    next if( $read !~ m/\.fastq/ &&
 		     $read !~ m/\.fq/    &&
 		     $read !~ m/\.fastq/ &&
 		     $read !~ m/\.fa/    );
-	} 
+	}
 	my @suffixlist = ( ".gz" );
 	my( $name, $path, $suffix ) = fileparse( $read, @suffixlist );
 	push( @reads, $name );
@@ -650,22 +711,26 @@ sub _get_fastq_file_names{
 
 sub _run_fastqc{
     my( $args ) = @_;
- 
+
     #args->{in_file} is the fastq file to process
     #args->{result_dir} is output directory
     #args->{log_dir} is directory containing log files for each task
     #args->{nprocs} is number of tasks to run in parallel
     #args->{fastqc} is path to fastqc binary
-    
+
     my $in_file    = $args->{"in_file"};
     my $result_dir = $args->{"result_dir"};
     my $log_dir    = $args->{"log_dir"};
     my $fastqc     = $args->{"fastqc"};
     my $is_clean   = $args->{"is_clean_check"};
+    my $nprocs     = $args->{"nprocs"};
 
     my $in_base  = basename( $in_file );
     my $log_file = File::Spec->catfile( $log_dir, $in_base . ".log" );
-    my $cmd = "${fastqc} -o=$result_dir $in_file > $log_file 2>&1";
+    my $cmd = "${fastqc} -t $nprocs -o=$result_dir $in_file > $log_file 2>&1";
+    if( $local_perl ){
+        $cmd = "perl $cmd";
+    }
     print "$cmd\n";
     if( system( $cmd ) ){
 	die "GOT AN ERROR RUNNING FASTQC\n";
@@ -683,6 +748,9 @@ sub _run_split_reads{
     my $file_basename = basename( $in_file );
     my $log_file = File::Spec->catfile( $log_dir, $file_basename . ".log" );
     my $cmd = "${split_reads} -i ${in_file} -n ${n_splits} -o ${result_dir} -f $in_format > ${log_file} 2>&1";
+    if( $local_perl ){
+        $cmd = "perl $cmd";
+    }
     print "$cmd\n";
     if( system( $cmd ) ){
 	die "GOT AN ERROR RUNNING SPLIT READS\n";
@@ -714,15 +782,15 @@ sub _run_bowtie2{
 	my $pid = $pm->start and next;
 	my $cmd;
 	#do some housekeeping
-	my $read = $reads[$i-1];          
+	my $read = $reads[$i-1];
 	#Begin CGedits
-	my $f_mate;
-	if ( $trim_method_list =~ m/prinseq/ ){
-		$f_mate = "$read.fastq";
-	}else{
-		$f_mate = $read; 
-	} 
-	#my $f_mate = $read;
+        # my $f_mate;
+        # if ( $trim_method_list =~ m/prinseq/ ){
+	# 	$f_mate = "$read.fastq";
+	# }else{
+	# 	$f_mate = $read;
+	# }
+	my $f_mate = $read;
 	#END cgedits
 	my $f_in  = File::Spec->catfile( $in_dir, $f_mate );
 	my $f_base = basename( $read, @in_suffixes ); #this contains the split value!
@@ -739,7 +807,7 @@ sub _run_bowtie2{
 	}
 	my $f_log = File::Spec->catfile( $log_dir, $f_mate . ".log" );
 	#prepare the output
-        #might need to consider if we want a single output file or not.  
+        #might need to consider if we want a single output file or not.
 	my $out_stem = $read;
 	my $out_path = File::Spec->catfile( $result_dir, $out_stem );
 	#loop over dbs and run bmtagger
@@ -753,14 +821,14 @@ sub _run_bowtie2{
 		$input_string .= "-U $f_in ";
 	    }
 	    my $out_string = "";
-	    #with this notation, we keep all reads that don't concordantly align. 
+	    #with this notation, we keep all reads that don't concordantly align.
 	    #not necessairly conservative, but maybe best for metagenomes? Need to
 	    #test accuracy.
 	    if( $paired_end ){
 		$out_string .= "--un-conc ${out_path} --al /dev/null ";
-	    } else { 
+	    } else {
 		$out_string .= "--un ${out_path} --al /dev/null ";
-	    }	    
+	    }
 	    $cmd =  "$bowtie2 ";
 	    if( $in_format eq "fasta" ){
 		$cmd .= " -f ";
@@ -776,7 +844,7 @@ sub _run_bowtie2{
 	    #trim the name of the output file to standard to ease next steps. Use a move
 	    if( !$paired_end ){
 		#nothing needs to be done - names are preserved
-	    } 
+	    }
 	    if( $paired_end ){ 	    #a little awkward with how bowtie renames files
 		#read 1.
 		my $suf;
@@ -809,7 +877,7 @@ sub _run_bowtie2{
 	}
 	$pm->finish; # Terminates the child process
     }
-    $pm->wait_all_children;    
+    $pm->wait_all_children;
 }
 
 sub _run_bmtagger{
@@ -838,7 +906,7 @@ sub _run_bmtagger{
 	my $pid = $pm->start and next;
 	my $cmd;
 	#do some housekeeping
-	my $read = $reads[$i-1];          
+	my $read = $reads[$i-1];
 	my $f_mate = $read;
 	my $f_in  = File::Spec->catfile( $in_dir, $f_mate );
 	my $f_base = basename( $read, @in_suffixes ); #this contains the split value!
@@ -855,7 +923,7 @@ sub _run_bmtagger{
 	}
 	my $f_log = File::Spec->catfile( $log_dir, $f_mate . ".log" );
 	#prepare the output
-        #might need to consider if we want a single output file or not.  
+        #might need to consider if we want a single output file or not.
 	my $out_stem = $read;
 	my $out_path = File::Spec->catfile( $result_dir, $out_stem );
 	#loop over dbs and run bmtagger
@@ -877,9 +945,8 @@ sub _run_bmtagger{
 		} else {
 		    $cmd .= "-q 1 ";
 		}
-		
 		if( $paired_end ){
-		    $cmd .=  "$f_string $r_string -o $out_path"; 
+		    $cmd .=  "$f_string $r_string -o $out_path";
 		} else {
 		    $cmd .= "$f_string -o $out_path" ;
 		}
@@ -890,9 +957,9 @@ sub _run_bmtagger{
 		$cmd =  "$bmtagger ";
 		$cmd .= "-b $bitmask -x $srprism -T $tmp_dir -d $database ";
 		if( $paired_end ){
-		    $cmd .= "-q 1 $f_string $r_string -o $out_path"; 
+		    $cmd .= "-q 1 $f_string $r_string -o $out_path";
 		} else {
-		    $cmd .= "-q 1 $f_string -o $out_path"; 
+		    $cmd .= "-q 1 $f_string -o $out_path";
 		}
 	    }
 	    $cmd .= " &> $f_log";
@@ -931,7 +998,7 @@ sub _run_bmtagger{
 	}
 	$pm->finish; # Terminates the child process
     }
-    $pm->wait_all_children;    
+    $pm->wait_all_children;
 }
 
 sub _run_deconseq{
@@ -939,9 +1006,9 @@ sub _run_deconseq{
 
     my $deconseq    = $args->{ "deconseq" };
     my $in_dir      = $args->{ "in_dir" };
-    my @reads       = @{ $args->{ "file_names" } }; 
+    my @reads       = @{ $args->{ "file_names" } };
     my $result_dir  = $args->{ "result_dir" };
-    my $log_dir     = $args->{"log_dir"}; 
+    my $log_dir     = $args->{"log_dir"};
     my $nprocs      = $args->{"nprocs"};
     my $tmp_dir     = $args->{"tmp_dir"};
     my @db_names    = @{ $args->{"db_names"} };
@@ -966,6 +1033,9 @@ sub _run_deconseq{
 	$f_log = File::Spec->catfile( $log_dir, $f_mate . ".log" );
 	#Start threads
 	$cmd = "$deconseq -id $f_out_name -out_dir $result_dir -f $f_in -dbs $db_string";
+        if( $local_perl ){
+            $cmd = "perl $cmd";
+        }
 	print "$cmd\n";
 	if( system( $cmd ) ){
 	    die "GOT AN ERROR RUNNING DECONSEQ!\n";
@@ -978,7 +1048,7 @@ sub _run_deconseq{
 	move( $to_move, $new );
 	$pm->finish; # Terminates the child process
     }
-    $pm->wait_all_children;    
+    $pm->wait_all_children;
     #reverse reads
     if( $paired_end ){
 	my $pm2 = Parallel::ForkManager->new($nprocs);
@@ -1005,6 +1075,9 @@ sub _run_deconseq{
 	    my $r_log = File::Spec->catfile( $log_dir, "${mate_base}_${split}" . ".log" );
 	    #Start threads
 	    $cmd = "$deconseq -id $r_out_name -out_dir $result_dir -f $r_in -dbs $db_string";
+            if( $local_perl ){
+                $cmd = "perl $cmd";
+            }
 	    print "$cmd\n";
 	    if( system( $cmd ) ){
 		die "GOT AN ERROR RUNNING DECONSEQ!\n";
@@ -1020,7 +1093,7 @@ sub _run_deconseq{
 	    }
 	    $pm2->finish; # Terminates the child process
 	}
-	$pm2->wait_all_children;    
+	$pm2->wait_all_children;
     }
 }
 
@@ -1046,7 +1119,7 @@ sub _run_prinseq{
 	for( my $i=1; $i<=$nprocs; $i++ ){
 	    my $pid = $pm->start and next;
 	    #do some housekeeping
-	    my $read = $reads[$i-1];          
+	    my $read = $reads[$i-1];
 	    my ( $f_in, $r_in );
 	    my $f_mate = $read;
 	    $f_in  = File::Spec->catfile( $in_dir, $f_mate );
@@ -1063,7 +1136,7 @@ sub _run_prinseq{
 	    }
 	    my $log = File::Spec->catfile( $log_dir, $f_mate . ".log" );
 	    my $out_path = File::Spec->catfile( $result_dir, $read );
-	    my $compressed = 0;	   
+	    my $compressed = 0;
 	    my $gz_file = File::Spec->catfile( $f_in . ".gz" );
 	    if( -e $gz_file ){
 		$compressed = 1;
@@ -1077,7 +1150,7 @@ sub _run_prinseq{
 	    #$cmd =  "$prinseq -verbose -derep 14 -derep_min 2 -no_qual_header "; #do we want -exact_only?
 	    $cmd .=  "$prinseq -verbose "; #do we want -exact_only?
 	    $cmd .= "-min_len 60 -max_len 300 -min_qual_mean 25 -ns_max_n 0 ";
-	    $cmd .= "-lc_method entropy -lc_threshold 60 -trim_qual_left 20 -trim_qual_right 20 ";
+	    $cmd .= "-lc_method entropy -lc_threshold 30 -trim_qual_left 20 -trim_qual_right 20 ";
 	    if( $paired_end ){
 		$cmd .= "-out_good $out_path -fastq $f_in -fastq2 $r_in -log $log ";
 	    } else {
@@ -1090,27 +1163,61 @@ sub _run_prinseq{
 	    }
 	    $cmd .= "-out_bad null ";
 	    $cmd    .= "&> $log ";
+            if( $local_perl ){
+                $cmd = "perl $cmd";
+            }
 	    print "$cmd\n";
 	    if( system( $cmd ) ){
 		die "GOT AN ERROR RUNNING PRINSEQ!\n";
 	    }
-	    #trim the name of the output file to standard to ease next steps. Use a move
-	    #read 1
-	    my $to_move = $out_path . "_1.fastq";
-	    my $new     = $out_path;
-	    move( $to_move, $new );
+            # #trim the name of the output file to standard to ease next steps. Use a move
+	    # #read 1
+	    # my $to_move = $out_path . "_1.fastq";
+	    # my $new     = $out_path;
+	    # move( $to_move, $new );
 
-	    #read 2
-	    if( $paired_end ){
-		my $to_move = $out_path . "_2.fastq";
-		my $new     = $to_move;
-		$new        =~ s/$f_base/${mate_base}_${split}/;
-		$new        =~ s/_2\.fastq$//;
-		move( $to_move, $new );
-	    }
+	    # #read 2
+	    # if( $paired_end ){
+	    #     my $to_move = $out_path . "_2.fastq";
+	    #     my $new     = $to_move;
+	    #     $new        =~ s/$f_base/${mate_base}_${split}/;
+	    #     $new        =~ s/_2\.fastq$//;
+	    #     move( $to_move, $new );
+	    # }
+
+            # Move to remove the prinseq-specific suffixes
+            # my $suf = ".fastq";
+            my $suf;
+            if( $in_format eq "fasta" ){
+                $suf = ".fasta";
+            } else {
+                $suf = ".fastq";
+            }
+
+            if ( ! $paired_end ){
+                my $to_move = $out_path . $suf;
+                my $new     = $out_path;
+                $new        =~ s/${suf}$//;
+                move( $to_move, $new );
+            } else {
+                #trim the name of the output file to standard to ease next steps. Use a move
+                #read 1
+                my $to_move = $out_path . "_1" . $suf;
+                my $new     = $out_path;
+                $new        =~ s/_1${suf}$//;
+                move( $to_move, $new );
+
+                #read 2
+                my $to_move2= $out_path . "_2" . $suf;
+                my $new2    = $to_move2;
+                $new2       =~ s/$f_base/${mate_base}_${split}/;
+                $new2       =~ s/_2${suf}$//;
+                move( $to_move2, $new2 );
+            }
+
 	    $pm->finish; # Terminates the child process
 	}
-	$pm->wait_all_children;    
+	$pm->wait_all_children;
     } else {
 	my $in_file   = $reads[0]; #includes split value!
 	if( $in_format eq "fastq" ){
@@ -1126,22 +1233,29 @@ sub _run_prinseq{
 	    $r_in  =~ s/$f_base/${mate_base}/;
 	}
 	my $log      = File::Spec->catfile( $log_dir, $in_file . ".log" );
-	my $out_file = $in_file; #just the file name 
+	my $out_file = $in_file; #just the file name
 	my $out_path = File::Spec->catfile( $result_dir, $out_file );
 	my $cmd =  "$prinseq -verbose -derep 14 -derep_min 2 "; #do we want -exact_only?
 	#$cmd    .= "-out_good $out_path -fastq $in_path -log $log_path ";
 	if( $paired_end ){
-	    $cmd .= "-out_good $out_path -fastq $f_in -fastq2 $r_in -log $log ";
+	    if( $in_format eq "fastq" ){
+                $cmd .= "-out_good $out_path -fastq $f_in -fastq2 $r_in -log $log ";
+            } else{
+                $cmd .= "-out_good $out_path -fasta $f_in -fasta2 $r_in -log $log ";
+            }
 	} else {
 	    if( $in_format eq "fastq" ){
-		$cmd .= "-fastq $f_in ";	   
+		$cmd .= "-fastq $f_in ";
 	    } else {
-		$cmd .= "-fasta $f_in ";	   
+		$cmd .= "-fasta $f_in ";
 	    }
 	    $cmd .= "-out_good $out_path -log $log ";
 	}
 	$cmd    .= "-out_bad null ";
 	$cmd    .= "&> $log ";
+        if( $local_perl ){
+            $cmd = "perl $cmd";
+        }
 	print "$cmd\n";
 	if( system( $cmd ) ){
 	    die "GOT AN ERROR RUNNING PRINSEQ DEREP!\n";
@@ -1154,17 +1268,30 @@ sub _run_prinseq{
 	} else {
 	    $suf = ".fastq";
 	}
-	my $to_move = $out_path . $suf;
-	my $new     = $out_path;
-	$new        =~ s/${suf}$//;
-	move( $to_move, $new );
-	#read 2
-	if( $paired_end ){
-	    my $to_move = $out_path . $suf;
-	    my $new     = $to_move;
-	    $new        =~ s/$f_base/${mate_base}/;
-	    $new        =~ s/${suf}$//;
+        if ( ! $paired_end ){
+            my $to_move = $out_path . $suf;
+            my $new     = $out_path;
+            $new        =~ s/${suf}$//;
+            move( $to_move, $new );
+        } else {
+	    #trim the name of the output file to standard to ease next steps. Use a move
+	    #read 1
+	    my $to_move = $out_path . "_1" . $suf;
+	    my $new     = $out_path;
+            $new        =~ s/_1${suf}$//;
 	    move( $to_move, $new );
+
+	    #read 2
+            my $to_move2= $out_path . "_2" . $suf;
+            my $new2    = $to_move2;
+            $new2       =~ s/$f_base/${mate_base}/;
+            $new2       =~ s/_2${suf}$//;
+            move( $to_move2, $new2 );
+            # my $to_move = $out_path . $suf;
+	    # my $new     = $to_move;
+	    # $new        =~ s/$f_base/${mate_base}/;
+	    # $new        =~ s/${suf}$//;
+	    # move( $to_move, $new );
 	}
     }
 }
@@ -1181,7 +1308,7 @@ sub _cat_reads{
     my $mate_base  = $args->{"mate_basename"};
     my @in_suffixes = @{ $args->{"in_suffixes"} };
     #prep the array of files for cat
-    my @sorted     = sort( @reads );    
+    my @sorted     = sort( @reads );
     @sorted        = map { $in_dir . "/" . $_ } @sorted;
     my @f_sorted   = ();
     my @r_sorted   = ();
@@ -1231,10 +1358,10 @@ sub _cat_reads{
 
 sub _set_settings{
     my ($ra_qc_methods, $ra_trim_methods,
-	$ra_filter_methods, $ra_derep_methods, 
+	$ra_filter_methods, $ra_derep_methods,
 	$run_raw_fastqc,
 	$in_format, $out_format,
-	$filter_test ) = @_;   
+	$filter_test ) = @_;
     my $run_raw_qc   = $run_raw_fastqc;
     my $split_reads  = 1;
     my $run_trim     = 1;
@@ -1248,13 +1375,12 @@ sub _set_settings{
 	$run_trim      = 0;
 	$check_qc      = 0;
 	$ra_trim_methods = ();
-	
     }
     if( $filter_test ){
 	$derep       = 0;
     }
     my $settings = _build_settings($ra_qc_methods, $ra_trim_methods,
-				   $ra_filter_methods, $ra_derep_methods, 
+				   $ra_filter_methods, $ra_derep_methods,
 				   $in_format, $out_format,
 				   $filter_test );
     my @params   = ( $run_raw_qc, $split_reads, $run_trim, $run_filter,
@@ -1265,7 +1391,7 @@ sub _set_settings{
 
 sub _build_settings{
     my ($ra_qc_methods, $ra_trim_methods,
-	$ra_filter_methods, $ra_derep_methods, 
+	$ra_filter_methods, $ra_derep_methods,
 	$in_format, $out_format,
 	$filter_test ) = @_;
     my @qc_methods     = @{ $ra_qc_methods };
@@ -1310,9 +1436,9 @@ sub _build_settings{
 	    next;
 	} else {
 	    my $next = $keys[$i+1];
-	    my $prior = $keys[$i-1]; 
+	    my $prior = $keys[$i-1];
 	    if( $prior eq "fastqc" ){
-		$settings->{$key}->{"input"}  = "";       
+		$settings->{$key}->{"input"}  = "";
 	    } else {
 		$settings->{$key}->{"input"}  = $prior;
 	    }
@@ -1331,8 +1457,8 @@ sub _get_root{
 }
 
 sub _check_vars{
-    my ( $in_fastq,  $pair_fastq, $out_dir, 
-	 $index_dir, $index_basename, $in_format, 
+    my ( $in_fastq,  $pair_fastq, $out_dir,
+	 $index_dir, $index_basename, $in_format,
 	 $out_format, $nofilter ) = @_;
     if( !defined $in_fastq ){
 	die( "You must point me to a fastq file using -1\n" );
@@ -1376,7 +1502,7 @@ sub _check_vars{
 	if( !@files ){
 	    die( "I cannot located an indexed genome database in the index_directory " .
 		 "using the index_basename you specified, which was\n" .
-		 $index_basename . "\n" );	     
+		 $index_basename . "\n" );
 	}
     }
 }
@@ -1395,9 +1521,11 @@ sub _parse_method_list{
 		die( "I don't know how to process $method\n" );
 	    }
 	} elsif( $type eq "trim" ){
-	    if( $method ne "trimmomatic" && 
+	    if( $method ne "trimmomatic" &&
 		$method ne "prinseq"     &&
-		$method ne "fastq-mcf"   ){
+		$method ne "fastq-mcf"   &&
+                $method ne "bbduk" &&
+                $method ne "atropos"){
 		die( "I don't know how to process $method\n" );
 	    }
 	} elsif( $type eq "filter" ){
@@ -1448,7 +1576,7 @@ sub _run_fastuniq{
     print TMP $f_in . "\n" . $r_in;
     close TMP;
     my $log      = File::Spec->catfile( $log_dir, $in_file . ".log" );
-    my $out_file = $in_file; #just the file name 
+    my $out_file = $in_file; #just the file name
     my $f_out    = File::Spec->catfile( $result_dir, $out_file );
     my $r_out    = $f_out;
     $r_out       =~ s/$f_base/${mate_base}/;
@@ -1464,7 +1592,7 @@ sub _run_fastuniq{
     print "$cmd\n";
     if( system( $cmd ) ){
 	die "GOT AN ERROR RUNNING FASTUNIQ!\n";
-    }	    
+    }
 }
 
 sub _run_trimmomatic{
@@ -1487,7 +1615,7 @@ sub _run_trimmomatic{
     for( my $i=1; $i<=$nprocs; $i++ ){
 	my $pid = $pm->start and next;
 	#do some housekeeping
-	my $read = $reads[$i-1];          
+	my $read = $reads[$i-1];
 	#prepare input files
 	my ( $f_in, $r_in );
 	my $f_mate = $read;
@@ -1514,7 +1642,7 @@ sub _run_trimmomatic{
 	    $r_out     =~ s/$f_base/${mate_base}_${split}/;
 	    $r_single = $r_out . ".singletons";
 	}
-	my $compressed = 0;	   
+	my $compressed = 0;
 	my $gz_file = File::Spec->catfile( $f_in . ".gz" );
 	if( -e $gz_file ){
 	    $compressed = 1;
@@ -1542,7 +1670,7 @@ sub _run_trimmomatic{
 	}
 	$pm->finish; # Terminates the child process
     }
-    $pm->wait_all_children;    
+    $pm->wait_all_children;
 }
 
 sub _run_fastq_mcf{
@@ -1565,7 +1693,7 @@ sub _run_fastq_mcf{
     for( my $i=1; $i<=$nprocs; $i++ ){
 	my $pid = $pm->start and next;
 	#do some housekeeping
-	my $read = $reads[$i-1];          
+	my $read = $reads[$i-1];
 	#prepare input files
 	my ( $f_in, $r_in );
 	my $f_mate = $read;
@@ -1592,13 +1720,13 @@ sub _run_fastq_mcf{
 	    $r_out     =~ s/$f_base/${mate_base}_${split}/;
 	    $r_single = $r_out . ".singletons";
 	}
-	my $compressed = 0;	   
+	my $compressed = 0;
 	my $gz_file = File::Spec->catfile( $f_in . ".gz" );
 	if( -e $gz_file ){
 	    $compressed = 1;
 	}
-	my $cmd = "${fastq_mcf} ";       
-	#now all of the thesholds       
+	my $cmd = "${fastq_mcf} ";
+	#now all of the thesholds
 	$cmd .= "-q 25 -u --max-ns 1 -l 60 --qual-mean 25 ";
 	if( defined( $adapt_path ) ){
 	    if( -e $adapt_path ){
@@ -1621,9 +1749,166 @@ sub _run_fastq_mcf{
 	}
 	$pm->finish; # Terminates the child process
     }
-    $pm->wait_all_children;    
+    $pm->wait_all_children;
 }
 
+sub _run_bbduk{
+    my( $args ) = @_;
+
+    my $in_dir      = $args->{"in_dir"};
+    my @reads       = @{ $args->{"file_names"} };
+    my $result_dir  = $args->{"result_dir"};
+    my $log_dir     = $args->{"log_dir"};
+    my $nprocs      = $args->{"nprocs"};
+    my $overwrite   = $args->{"overwrite"};
+    my $bbduk       = $args->{"bbduk"};
+    my $paired_end  = $args->{"paired_end"};
+    my $mate_base   = $args->{"mate_basename"};
+    my $jm          = $args->{"ram"};
+    my $adapt_path  = $args->{"adapt"};
+    my @in_suffixes = @{ $args->{"in_suffixes"} };
+
+    my $pm = Parallel::ForkManager->new($nprocs);
+    for( my $i=1; $i<=$nprocs; $i++ ){
+	my $pid = $pm->start and next;
+	#do some housekeeping
+	my $read = $reads[$i-1];
+	#prepare input files
+	my ( $f_in, $r_in );
+	my $f_mate = $read;
+	$f_in  = File::Spec->catfile( $in_dir, $f_mate );
+	my $f_base = basename( $read, @in_suffixes ); #this contains the split value!
+	my $split;
+	if( $f_base =~ m/_(\d+)$/ ){
+	    $split = $1;
+	} else {
+	    die "Can't parse split from $f_base\n";
+	}
+	if( $paired_end ){
+	    $r_in  = $f_in;
+	    $r_in  =~ s/$f_base/${mate_base}_${split}/;
+	}
+	#prepare log file
+	my $log = File::Spec->catfile( $log_dir, $f_mate . ".log" );
+	#prepare output files
+	my $f_out = File::Spec->catfile( $result_dir, $read );
+	my $f_single = $f_out . ".singletons";
+	my( $r_out, $r_single );
+	if( $paired_end ){
+	    $r_out = $f_out;
+	    $r_out     =~ s/$f_base/${mate_base}_${split}/;
+	    $r_single = $r_out . ".singletons";
+	}
+	my $compressed = 0;
+	my $gz_file = File::Spec->catfile( $f_in . ".gz" );
+	if( -e $gz_file ){
+	    $compressed = 1;
+	}
+	my $cmd = "${bbduk} ";
+	#now all of the thesholds
+	$cmd .= "-Xmx1g ktrim=r k=23 mink=11 hdist=1 qtrim=rl trimq=25 t=1 minlength=60 maxns=0 ";
+	if( defined( $adapt_path ) ){
+	    if( -e $adapt_path ){
+		$cmd .= "ref=${adapt_path} ";
+	    } else {
+		die "I can't find an adaptor file at the path specified by --adapt-path. " .
+		    "You gave me ${adapt_path}\n";
+	    }
+	}
+	if( $paired_end ){
+	    #$cmd .= "PE -threads 1 -phred33 ${f_in} ${r_in} ${f_out} ${f_single} ${r_out} ${r_single} ";
+	    $cmd .=  "out1=${f_out} out2=${r_out} in1=${f_in} in2=${r_in} tpe tbo ";
+	} else {
+	    $cmd .= "out=${f_out} in=${f_in} ";
+	}
+	$cmd    .= "&> $log ";
+	print "$cmd\n";
+	if( system( $cmd ) ){
+	    die "GOT AN ERROR RUNNING BBDUK!\n";
+	}
+	$pm->finish; # Terminates the child process
+    }
+    $pm->wait_all_children;
+}
+
+sub _run_atropos{
+    my( $args ) = @_;
+
+    my $in_dir      = $args->{"in_dir"};
+    my @reads       = @{ $args->{"file_names"} };
+    my $result_dir  = $args->{"result_dir"};
+    my $log_dir     = $args->{"log_dir"};
+    my $nprocs      = $args->{"nprocs"};
+    my $overwrite   = $args->{"overwrite"};
+    my $atropos     = $args->{"atropos"};
+    my $paired_end  = $args->{"paired_end"};
+    my $mate_base   = $args->{"mate_basename"};
+    my $jm          = $args->{"ram"};
+    my $adapt_path  = $args->{"adapt"};
+    my @in_suffixes = @{ $args->{"in_suffixes"} };
+
+    my $pm = Parallel::ForkManager->new($nprocs);
+    for( my $i=1; $i<=$nprocs; $i++ ){
+	my $pid = $pm->start and next;
+	#do some housekeeping
+	my $read = $reads[$i-1];
+	#prepare input files
+	my ( $f_in, $r_in );
+	my $f_mate = $read;
+	$f_in  = File::Spec->catfile( $in_dir, $f_mate );
+	my $f_base = basename( $read, @in_suffixes ); #this contains the split value!
+	my $split;
+	if( $f_base =~ m/_(\d+)$/ ){
+	    $split = $1;
+	} else {
+	    die "Can't parse split from $f_base\n";
+	}
+	if( $paired_end ){
+	    $r_in  = $f_in;
+	    $r_in  =~ s/$f_base/${mate_base}_${split}/;
+	}
+	#prepare log file
+	my $log = File::Spec->catfile( $log_dir, $f_mate . ".log" );
+	#prepare output files
+	my $f_out = File::Spec->catfile( $result_dir, $read );
+	my $f_single = $f_out . ".singletons";
+	my( $r_out, $r_single );
+	if( $paired_end ){
+	    $r_out = $f_out;
+	    $r_out     =~ s/$f_base/${mate_base}_${split}/;
+	    $r_single = $r_out . ".singletons";
+	}
+	my $compressed = 0;
+	my $gz_file = File::Spec->catfile( $f_in . ".gz" );
+	if( -e $gz_file ){
+	    $compressed = 1;
+	}
+	my $cmd = "${atropos} ";
+	#now all of the thesholds
+	$cmd .= "-q 25,25 --trim-n -m 60 --max-n 0 ";
+	if( defined( $adapt_path ) ){
+	    if( -e $adapt_path ){
+		$cmd .= "-a file:${adapt_path} ";
+	    } else {
+		die "I can't find an adaptor file at the path specified by --adapt-path. " .
+		    "You gave me ${adapt_path}\n";
+	    }
+	}
+	if( $paired_end ){
+	    #$cmd .= "PE -threads 1 -phred33 ${f_in} ${r_in} ${f_out} ${f_single} ${r_out} ${r_single} ";
+	    $cmd .=  "-o ${f_out} -p ${r_out} -pe1 ${f_in} -pe2 ${r_in} -A file:${adapt_path} ";
+	} else {
+	    $cmd .= "-o ${f_out} -se ${f_in} ";
+	}
+	$cmd    .= "&> $log ";
+	print "$cmd\n";
+	if( system( $cmd ) ){
+	    die "GOT AN ERROR RUNNING ATROPOS!\n";
+	}
+	$pm->finish; # Terminates the child process
+    }
+    $pm->wait_all_children;
+}
 sub _check_in_format{
     my( $input, $in_format ) = @_;
     if( $input =~ m/\.gz/ ){

@@ -137,21 +137,21 @@ fastq, fasta, and fastqc results will be retained, and all files will be gzipped
 Dependencies
 ------------
 
-###Perl Modules
-*Carp
-*File::Basename
-*File::Copy
-*File::Path
-*File::Spec
-*File::Spec::Functions
-*Parallel::ForkManager
-*Getopt::Long
+### Perl Modules ###
+* Carp
+* File::Basename
+* File::Copy
+* File::Path
+* File::Spec
+* File::Spec::Functions
+* Parallel::ForkManager
+* Getopt::Long
 
-###External Software
-*bowtie2
-*bmtagger
-*FastQC
-*FastUnique
-*prinseq
-*seqret (EMBOSS)
-*trimmomatic
+### External Software ###
+* bowtie2
+* bmtagger
+* FastQC
+* FastUnique
+* prinseq
+* seqret (EMBOSS)
+* trimmomatic
